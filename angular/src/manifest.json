@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Nimbus07",
+  "short_name": "nimbus",
+  "version": "0.0.7",
+  "description": "nimbus description",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "action": {
+    "default_popup": "index.html?#/main",
+    "default_title": "Nimbus"
+  },
+  "options_page": "index.html?#/options",
+  "content_scripts": [
+    {
+      "js": [
+        "contentPage.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "backgroundPage.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

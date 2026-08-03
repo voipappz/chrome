@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build output
+angular/dist/
+extension-build.zip
+
+# Secrets — never commit credentials
+creds.txt
+.env
+.env.test
+
+# Test artifacts
+test-results/
+playwright-report/

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 2,
+  "name": "va-voipbox-chrome",
+  "short_name": "va-voipbox-chrome",
+  "version": "1.0.0",
+  "description": "Generated with @larscom/ng-chrome-extension",
+  "permissions": [
+    "tabs"
+  ],
+  "browser_action": {
+    "default_popup": "index.html?#/main",
+    "default_title": "Angular Chrome Extension"
+  },
+  "options_page": "index.html?#/options",
+  "chrome_url_overrides": {
+    "newtab": "index.html?#/tab"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "contentPage.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "background": {
+    "scripts": [
+      "backgroundPage.js"
+    ],
+    "persistent": false
+  },
+  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'"
+}

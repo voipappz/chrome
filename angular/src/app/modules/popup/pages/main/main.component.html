@@ -1,0 +1,93 @@
+<div class="container" dir="rtl">
+    <!-- <mat-toolbar color="primary">
+        
+        <span>{{page_title}}</span>
+        <span class="example-spacer"></span>
+        <button mat-icon-button class="example-icon" (click)="logout()">
+         <mat-icon class="mat-icon-rtl-mirror">logout</mat-icon>
+       </button>
+    </mat-toolbar> -->
+    <mat-toolbar color="primary" style="justify-content: space-between;font-size: 16px;">
+        <span style="
+        background-color: #fff;
+        color: #3f51b5;
+        padding: 0px 15px;
+        border-radius: 40px;display: flex;margin-inline-end: 5px;
+    justify-content: space-between;">
+            <img style="margin-inline-start: -15px;
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 4px 5px;
+            border-radius: 23px;
+            height: 25px;" [src]="(user.available_flag=='logged_out'&&(!user.status||user.status==''))?'/assets/images/NotActiveUser.svg' : ((user.status&&user.status!=''))? '/assets/images/NotReadyUser.svg':'/assets/images/ActiveUser.svg'"/>
+            {{user.first_name+' '+user.last_name}}
+        </span>
+        <span style="display: flex;width: -webkit-fill-available;">
+            <span style="
+            background-color: #fff;max-width: 230px;
+            color: #3f51b5;
+            padding: 0px 15px;margin-inline-end: 5px;
+            border-radius: 40px;">
+                <mat-select style="width:100px" [(value)]="user.available_flag" (selectionChange)="userAvailableChanged($event)" [placeholder]="''">
+                
+                    <mat-option   [value]="'available'">
+                     זמין
+                    </mat-option>
+                    <mat-option   [value]="'logged_out'">
+                        לא זמין
+                    </mat-option>
+                  </mat-select>
+            </span>
+            <span style="
+            background-color: #fff;
+            color: #3f51b5;
+            padding: 0px 15px;
+            border-radius: 40px;margin-inline-end: 5px;
+            
+        ">
+                <mat-select style="max-width: 150px;min-width: 100px;" [(value)]="user.status" (selectionChange)="statusChanged($event)" [placeholder]="''">
+                
+                    <mat-option  *ngFor="let s of statuses" [value]="s.uuid">
+                      {{ s.name }}
+                    </mat-option>
+                    
+                  </mat-select>
+            </span>
+            
+            <span class="timer"  style="padding: 0px 15px;">
+                {{timer.string}}
+            </span>
+        </span>
+        
+        <span class="example-spacer"></span>
+        <button mat-icon-button class="example-icon" (click)="logout()">
+         <mat-icon class="mat-icon-rtl-mirror">logout</mat-icon>
+       </button>
+    </mat-toolbar>
+    <div class="call-info">
+        <mat-card *ngIf="callId">
+            <span matBadge="1" matBadgeOverlap="false" matBadgeSize="large">Call id: {{callId}}</span>
+
+            <h1>{{callStatus || 'none'}}</h1>
+            <mat-card-actions>
+                <button mat-raised-button color="primary" (click)="hangUp()">
+                    HANG UP 
+                    <mat-icon aria-hidden="false">call_end</mat-icon>
+                    
+                </button>
+            </mat-card-actions>
+        </mat-card>
+        <mat-card *ngIf="!callId">
+            <h1>No active calls</h1>
+        </mat-card>
+        <!-- <mat-card>
+            <mat-select  (selectionChange)="statusChanged($event)" [placeholder]="'Select status'">
+                
+                <mat-option  *ngFor="let s of statuses" [value]="s.uuid">
+                  {{ s.name }}
+                </mat-option>
+                
+              </mat-select>
+            {{user.status}}
+        </mat-card> -->
+    </div>    
+</div>
