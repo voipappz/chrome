@@ -13,8 +13,9 @@ export const test = base.extend<{
   context: async ({}, use) => {
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-ext-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
+      // headless:false + --headless=new: extensions only load in the "new"
+      // headless mode, which Playwright's headless:true does not use.
       headless: false,
-      executablePath: '/home/ubuntu/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome',
       args: [
         '--headless=new',
         '--no-sandbox',

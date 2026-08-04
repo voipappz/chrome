@@ -35,6 +35,8 @@ async function login(msg: any, port: any) {
 
     const domain = (msg.domain || CONFIG.API_ENDPOINT).replace(/\/+$/, '');
     const wsUrl = domain.replace(/^https?:\/\//, "wss://") + "/nats";
+    // Expose on self so Playwright can verify the connection target/state
+    (self as any)._nats_url = wsUrl;
     try {
         nc = await connect({
             servers: wsUrl,
@@ -52,9 +54,7 @@ async function login(msg: any, port: any) {
         return;
     }
     currentUuid = uuid;
-    // Expose on self so Playwright can verify connection state
     (self as any)._nats = nc;
-    (self as any)._nats_url = wsUrl;
     try { port.postMessage("connected to nats"); } catch (e) { /* popup closed */ }
 
     subscribeService("notifications", uuid, handleNotification);
