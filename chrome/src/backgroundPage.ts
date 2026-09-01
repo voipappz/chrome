@@ -52,7 +52,14 @@ async function login(msg: any, port: any) {
     disconnect();
 
     const domain = (msg.domain || CONFIG.API_ENDPOINT).replace(/\/+$/, '');
-    realtimeUrl = domain.replace(/^https?:\/\//, "wss://") + "/ws/events";
+    // Preserve the scheme rather than forcing wss: https -> wss, http -> ws.
+    // Production is https so the distinction never showed, but forcing wss at a
+    // plaintext server is a TLS handshake against a port that speaks none —
+    // which surfaces as a socket that simply never opens, with no error worth
+    // reading.
+    realtimeUrl =
+        (domain.startsWith("http://") ? domain.replace(/^http:\/\//, "ws://")
+                                      : domain.replace(/^https?:\/\//, "wss://")) + "/ws/events";
     currentUuid = uuid;
     currentToken = token;
     // Exposed on self so Playwright can verify the target before a connection

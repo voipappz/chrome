@@ -1,51 +1,47 @@
-import { test, expect } from '@playwright/test';
-import { chromium, type BrowserContext, type Worker } from '@playwright/test';
+import { test, expect, chromium } from '@playwright/test';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 
-/**
- * The receive path against a REAL platform: sign in, hold a live NATS
- * connection, then have the API publish an actual notification and assert the
- * extension opens the tab. mock-realtime.spec.ts proves the extension's own
- * logic against a fake; this proves the platform delivers — installer, API,
- * broker, edge, all of it.
- *
- * Gated behind TEST_RECEIVE=1 because it needs what only a disposable
- * environment should have: a node whose NATS accepts the extension's
- * credential (the shipped nats.conf deliberately does not), and a docker
- * daemon holding that node's va-app to publish through. The mothership CI
- * health-check job is exactly that environment.
- *
- *   TEST_RECEIVE=1  TEST_DOMAIN=https://127.0.0.1 \
- *   TEST_USERNAME=… TEST_PASSWORD=… [PUBLISH_SUDO=1]  npx playwright test real-receive
- */
 const EXT = path.resolve(__dirname, '../../angular/dist');
-const DOMAIN = process.env.TEST_DOMAIN ?? '';
-const USERNAME = process.env.TEST_USERNAME ?? '';
-const PASSWORD = process.env.TEST_PASSWORD ?? '';
+const DOMAIN = process.env.TEST_DOMAIN!;
+const USER = process.env.TEST_USERNAME!;
+const PASS = process.env.TEST_PASSWORD!;
 
-test.describe('Receive against a real platform', () => {
+/**
+ * The screen pop, end to end, against a REAL stack — no mocks anywhere.
+ *
+ *   voipappz-api  ──NATS notifications.<uuid>──>  realtime server
+ *                 ──/ws/events──>  this extension  ──>  a tab opens
+ *
+ * The decision to pop lives in the API (ScreenPopPopNode); the realtime server
+ * only relays; the extension only opens what it is told. This asserts the whole
+ * chain rather than any one hop, which is the only way the seams get tested.
+ *
+ * Gated on TEST_RECEIVE=1 because it needs a running stack it can publish
+ * into — a realtime server at TEST_DOMAIN, and a docker daemon holding the
+ * API container. Run it locally with:
+ *
+ *   TEST_RECEIVE=1 TEST_DOMAIN=http://127.0.0.1:4001 \
+ *   TEST_USERNAME=… TEST_PASSWORD=…  npx playwright test real-receive
+ *
+ * TEST_DOMAIN may be http (a plain local server) or https (behind a proxy that
+ * terminates TLS) — the worker follows the scheme, and a mismatch there is a
+ * socket that silently never opens.
+ */
+test('a tab:new published by the API opens a tab in the extension', async () => {
   test.skip(process.env.TEST_RECEIVE !== '1',
-    'set TEST_RECEIVE=1 (plus TEST_DOMAIN/USERNAME/PASSWORD) on a disposable node whose NATS accepts the extension credential');
+    'set TEST_RECEIVE=1 with a running stack (see the comment above)');
 
-  let ctx: BrowserContext;
-  let dir: string;
-
-  test.afterAll(async () => {
-    await ctx?.close();
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-elixir-'));
+  const ctx = await chromium.launchPersistentContext(dir, {
+    headless: false,
+    args: ['--headless=new', '--no-sandbox', '--ignore-certificate-errors',
+           `--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
   });
-
-  test('a notification published by the API opens the tab', async () => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-recv-'));
-    ctx = await chromium.launchPersistentContext(dir, {
-      headless: false,
-      args: ['--headless=new', '--no-sandbox', '--ignore-certificate-errors',
-             `--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
-    });
-    let sw: Worker = ctx.serviceWorkers()[0];
+  try {
+    let [sw] = ctx.serviceWorkers();
     if (!sw) sw = await ctx.waitForEvent('serviceworker', { timeout: 15_000 });
     const id = sw.url().split('/')[2];
 
@@ -53,29 +49,27 @@ test.describe('Receive against a real platform', () => {
     await page.goto(`chrome-extension://${id}/index.html#/main`);
     await page.waitForURL(/login/);
     await page.locator('input[formcontrolname="domain"]').fill(DOMAIN);
-    await page.locator('input[formcontrolname="username"]').fill(USERNAME);
-    await page.locator('input[formcontrolname="password"]').fill(PASSWORD);
+    await page.locator('input[formcontrolname="username"]').fill(USER);
+    await page.locator('input[formcontrolname="password"]').fill(PASS);
     await page.getByRole('button', { name: /login/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
     const uuid = await page.evaluate(() => localStorage.getItem('_id'));
-    expect(uuid, 'login stored no _id').toBeTruthy();
+    console.log('  logged in, user_uuid =', uuid);
 
-    // Live on the broker, not just logged in: _nats is set only after
-    // connect() resolves (backgroundPage.ts).
+    // The socket must be OPEN before publishing: the relay does not replay, so
+    // anything sent before the subscription lands is simply not delivered.
     const live = await sw.evaluate(() => new Promise<boolean>((resolve) => {
-      const ok = () => { const nc = (self as any)._nats; return !!nc && nc.isClosed() === false; };
+      const ok = () => { const s = (self as any)._realtime; return !!s && s.readyState === 1; };
       if (ok()) return resolve(true);
       const i = setInterval(() => { if (ok()) { clearInterval(i); resolve(true); } }, 300);
-      setTimeout(() => { clearInterval(i); resolve(false); }, 25_000);
+      setTimeout(() => { clearInterval(i); resolve(false); }, 20_000);
     }));
-    expect(live, `worker never connected to ${DOMAIN.replace(/^https?/, 'wss')}/nats — is the extension NATS user configured on this node?`).toBe(true);
+    console.log('  realtime socket open:', live);
+    expect(live, 'worker never opened /ws/events').toBe(true);
 
-    // Publish through the API's own mediator, in its own container — the same
-    // call the screen-pop PocketFlow node makes. $nats is established by the
-    // Puma boot, not by `ruby -e`, and the mediator silently no-ops without it
-    // (best-effort by design), so the publisher brings its own connection.
-    const url = `${DOMAIN}/e2e-popped`;
+    const url = `${DOMAIN}/record/elixir-tab`;
+    // Exactly what ScreenPopPopNode publishes — the decision stays in the API.
     const ruby = `
 require_relative 'lib/application'
 require 'nats/io/client'
@@ -85,17 +79,18 @@ Mediators::Broadcast::Nats.publish(service: 'notifications', uuid: '${uuid}',
   payload: { action: 'tab:new', url: '${url}' })
 $nats.flush(2)
 `;
-    const docker = ['exec', '-e', `RB=${ruby}`, 'va-app',
-      'sh', '-c', 'cd /opt/va-voipbox-api && bundle exec ruby -e "$RB"'];
     const opened = ctx.waitForEvent('page', { timeout: 20_000 });
-    if (process.env.PUBLISH_SUDO === '1') execFileSync('sudo', ['docker', ...docker], { stdio: 'pipe' });
-    else execFileSync('docker', docker, { stdio: 'pipe' });
+    execFileSync('docker', ['exec', '-e', `RB=${ruby}`, 'va-app', 'sh', '-c',
+      'cd /opt/va-voipbox-api && bundle exec ruby -e "$RB"'],
+      { stdio: 'pipe' });
+    console.log('  API published notifications.' + uuid);
 
-    // waitForEvent('page') resolves when the tab is CREATED, which is before it
-    // navigates — reading url() there returns about:blank and only passes on a
-    // lucky race. Wait for the navigation the extension actually asked for.
     const tab = await opened;
-    await tab.waitForURL(/e2e-popped/, { timeout: 15_000 });
-    expect(tab.url()).toContain('/e2e-popped');
-  });
+    await tab.waitForURL(/elixir-tab/, { timeout: 15_000, waitUntil: 'commit' });
+    console.log('  extension opened:', tab.url());
+    expect(tab.url()).toContain('elixir-tab');
+  } finally {
+    await ctx.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
