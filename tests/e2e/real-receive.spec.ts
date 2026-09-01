@@ -91,7 +91,11 @@ $nats.flush(2)
     if (process.env.PUBLISH_SUDO === '1') execFileSync('sudo', ['docker', ...docker], { stdio: 'pipe' });
     else execFileSync('docker', docker, { stdio: 'pipe' });
 
+    // waitForEvent('page') resolves when the tab is CREATED, which is before it
+    // navigates — reading url() there returns about:blank and only passes on a
+    // lucky race. Wait for the navigation the extension actually asked for.
     const tab = await opened;
+    await tab.waitForURL(/e2e-popped/, { timeout: 15_000 });
     expect(tab.url()).toContain('/e2e-popped');
   });
 });
