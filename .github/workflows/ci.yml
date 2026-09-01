@@ -1,0 +1,99 @@
+# The extension's own CI. CircleCI already builds this repo; this covers the
+# part it never did — actually loading the built extension into Chrome and
+# driving it — and publishes the release asset on a tag.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # webpack 4 asks OpenSSL for a hash OpenSSL 3 (Node 17+) no longer offers.
+  # Only the build:chrome* scripts set this in package.json, so build:production
+  # dies with ERR_OSSL_EVP_UNSUPPORTED without it here.
+  NODE_OPTIONS: --openssl-legacy-provider
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # --legacy-peer-deps: the Angular 11 tree does not satisfy npm 7+ peer
+      # resolution. Same flag CircleCI uses.
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build extension
+        run: npm run build:production
+
+      # A malformed manifest still "builds" — the failure only shows when Chrome
+      # refuses to load it. Assert the fields that make it loadable.
+      - name: Validate manifest
+        run: |
+          m=angular/dist/manifest.json
+          jq empty "$m"
+          test "$(jq -r .manifest_version "$m")" = "3" || { echo "expected manifest_version 3"; exit 1; }
+          for f in name version action background.service_worker; do
+            jq -e ".$f" "$m" >/dev/null || { echo "manifest missing $f"; exit 1; }
+          done
+          echo "manifest ok: $(jq -r .name "$m") $(jq -r .version "$m")"
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Without TEST_* the credential-dependent specs skip themselves by design,
+      # and what still runs is the part CI can actually prove: the built
+      # extension loads into Chrome, the service worker registers, and the popup
+      # renders its login form. That catches a broken build or manifest, which
+      # is most of what breaks here.
+      #
+      # Set the repository secrets to exercise the full suite against a node.
+      - name: Run Playwright
+        env:
+          TEST_DOMAIN: ${{ secrets.TEST_DOMAIN }}
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extension-build
+          path: extension-build.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+  # Tagging v* publishes the same artifact the build job just verified, so a
+  # release can never carry a zip that was not built and loaded in Chrome.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-build
+      - name: Attach the package to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" extension-build.zip --clobber
