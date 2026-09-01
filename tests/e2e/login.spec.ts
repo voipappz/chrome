@@ -111,31 +111,31 @@ test.describe('Main page (post-login)', () => {
   });
 });
 
-// ─── NATS WebSocket ────────────────────────────────────────────────────────────
+// ─── Cable WebSocket ──────────────────────────────────────────────────────────
 
-test.describe('NATS', () => {
-  test('targets wss://<domain>/nats after login', async ({ context, popupPage }) => {
+test.describe('Cable', () => {
+  test('targets wss://<domain>/cable after login', async ({ context, popupPage }) => {
     test.skip(!DOMAIN || !USERNAME || !PASSWORD, NEED_CREDS);
 
     await loginWith(popupPage, DOMAIN, USERNAME, PASSWORD);
 
     // The background service worker connects asynchronously.
-    // Poll self._nats_url (set in backgroundPage.ts) via sw.evaluate().
+    // Poll self._cable_url (set in backgroundPage.ts) via sw.evaluate().
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    const natsUrl: string | null = await sw.evaluate(() =>
+    const cableUrl: string | null = await sw.evaluate(() =>
       new Promise(resolve => {
-        const check = () => (self as any)._nats_url as string | undefined;
+        const check = () => (self as any)._cable_url as string | undefined;
         if (check()) { resolve(check()!); return; }
         const id = setInterval(() => { const v = check(); if (v) { clearInterval(id); resolve(v); } }, 200);
         setTimeout(() => { clearInterval(id); resolve(null); }, 10_000);
       })
     );
 
-    expect(natsUrl).not.toBeNull();
-    expect(natsUrl).toMatch(/^wss:\/\//);
-    expect(natsUrl).toContain('/nats');
+    expect(cableUrl).not.toBeNull();
+    expect(cableUrl).toMatch(/^wss:\/\//);
+    expect(cableUrl).toContain('/cable');
   });
 
   test('WebSocket connection becomes active', async ({ context, popupPage }) => {
@@ -146,13 +146,13 @@ test.describe('NATS', () => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    // self._nats is set only after connect() resolves; a live connection
-    // reports isClosed() === false.
+    // self._cable is the WebSocket itself; OPEN (readyState 1) is the only
+    // state in which the subscriptions could have been confirmed.
     const isActive: boolean = await sw.evaluate(() =>
       new Promise(resolve => {
         const check = () => {
-          const nc = (self as any)._nats;
-          return !!nc && nc.isClosed() === false;
+          const sock = (self as any)._cable;
+          return !!sock && sock.readyState === 1;
         };
         if (check()) { resolve(true); return; }
         const id = setInterval(() => { if (check()) { clearInterval(id); resolve(true); } }, 300);

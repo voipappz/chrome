@@ -13,9 +13,9 @@ const { WebSocketServer } = require('ws');
  * extension talks to —
  *
  *   POST /auth/user_login   -> a canned {token, user:{uuid}} session
- *   GET  /nats  (websocket) -> just enough NATS: INFO, CONNECT, PING/PONG,
- *                              SUB bookkeeping, and MSG frames pushed by the
- *                              test
+ *   GET  /cable (websocket) -> just enough ActionCable: welcome,
+ *                              confirm_subscription, and data frames pushed
+ *                              by the test
  *
  * Exists so the receive path — subject naming, payload decoding, the
  * chrome.storage contract, openTab — runs on a hosted CI runner with no real
@@ -26,8 +26,9 @@ const { WebSocketServer } = require('ws');
 export interface FakeNode {
   origin: string;
   userUuid: string;
-  subs: Map<string, number>; // subject -> sid, as SUBscribed by the worker
-  publish(subject: string, payload: unknown): boolean;
+  // identifier JSON (exactly as the client sent it) -> confirmed
+  subs: Map<string, boolean>;
+  publish(identifier: string, message: unknown): boolean;
   close(): Promise<void>;
 }
 
@@ -65,31 +66,29 @@ export async function startFakeNode(): Promise<FakeNode> {
     },
   );
 
-  const subs = new Map<string, number>();
+  const subs = new Map<string, boolean>();
   const sockets = new Set<any>();
-  const wss = new WebSocketServer({ server, path: '/nats' });
+  const wss = new WebSocketServer({ server, path: '/cable' });
 
-  wss.on('connection', (ws: any) => {
+  wss.on('connection', (ws: any, req: any) => {
+    // The subprotocol is required by the real server, so require it here too —
+    // otherwise a client that forgot it would pass the fake and fail in prod.
+    const proto = String(req.headers['sec-websocket-protocol'] || '');
+    if (!proto.includes('actioncable-v1-json')) { ws.close(); return; }
+
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    // Always binary frames: nats.ws parses bytes and a text frame would hand
-    // it a string.
-    ws.send(Buffer.from(
-      'INFO {"server_id":"FAKE","server_name":"FAKE","version":"2.14.6","proto":1,"headers":true,"max_payload":1048576,"client_id":1}\r\n',
-    ));
-    let acc = '';
+    ws.send(JSON.stringify({ type: 'welcome' }));
+
     ws.on('message', (data: Buffer) => {
-      acc += data.toString('latin1');
-      let i: number;
-      while ((i = acc.indexOf('\r\n')) !== -1) {
-        const line = acc.slice(0, i);
-        acc = acc.slice(i + 2);
-        if (line === 'PING') { ws.send(Buffer.from('PONG\r\n')); continue; }
-        if (line.startsWith('SUB ')) {
-          const [, subject, sid] = line.split(' ');
-          subs.set(subject, Number(sid));
-        }
-        // CONNECT / PONG / UNSUB need no reply for a non-verbose client.
+      let frame: any;
+      try { frame = JSON.parse(data.toString()); } catch { return; }
+      if (frame?.command === 'subscribe' && typeof frame.identifier === 'string') {
+        subs.set(frame.identifier, true);
+        // Echoed back VERBATIM: an ActionCable subscription is keyed by the
+        // exact identifier string, so a client matching on it must get the
+        // same bytes it sent.
+        ws.send(JSON.stringify({ type: 'confirm_subscription', identifier: frame.identifier }));
       }
     });
   });
@@ -101,15 +100,11 @@ export async function startFakeNode(): Promise<FakeNode> {
     origin: `https://localhost:${port}`,
     userUuid,
     subs,
-    publish(subject, payload) {
-      const sid = subs.get(subject);
-      if (sid === undefined) return false;
-      const body = JSON.stringify(payload);
-      const frame = Buffer.concat([
-        Buffer.from(`MSG ${subject} ${sid} ${Buffer.byteLength(body)}\r\n`),
-        Buffer.from(body),
-        Buffer.from('\r\n'),
-      ]);
+    publish(identifier, message) {
+      if (!subs.has(identifier)) return false;
+      // A data frame carries identifier + message and NO type — that absence
+      // is what tells a client it is data rather than protocol traffic.
+      const frame = JSON.stringify({ identifier, message });
       for (const ws of sockets) ws.send(frame);
       return true;
     },

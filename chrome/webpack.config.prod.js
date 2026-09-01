@@ -33,7 +33,6 @@ module.exports = {
   resolve: {
     extensions: ['.ts', '.js'],
     alias: {
-      'nats.ws': join(__dirname, '../node_modules/nats.ws/cjs/nats.js')
     }
   }
 };

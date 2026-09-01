@@ -15,6 +15,11 @@ import { startFakeNode, type FakeNode } from './helpers/fake-node';
  */
 const EXT = path.resolve(__dirname, '../../angular/dist');
 
+// An ActionCable subscription is keyed by the EXACT identifier string, so these
+// must be byte-identical to what backgroundPage.ts sends — key order included.
+const idNotifications = (uuid: string) => JSON.stringify({ channel: 'Notifications', user_uuid: uuid });
+const idState = (uuid: string) => JSON.stringify({ channel: 'StateChannel', scope: 'user', id: uuid });
+
 test.describe('Realtime against a mimicked node', () => {
   let node: FakeNode;
   let ctx: BrowserContext;
@@ -42,10 +47,10 @@ test.describe('Realtime against a mimicked node', () => {
     await page.getByRole('button', { name: /login/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
-    // Live means SUBscribed on the broker, not just navigated.
+    // Live means the cable subscriptions were confirmed, not just navigated.
     await expect
-      .poll(() => node.subs.has(`notifications.${node.userUuid}`)
-               && node.subs.has(`state.user.${node.userUuid}`), { timeout: 20_000 })
+      .poll(() => node.subs.has(idNotifications(node.userUuid))
+               && node.subs.has(idState(node.userUuid)), { timeout: 20_000 })
       .toBe(true);
   });
 
@@ -55,23 +60,23 @@ test.describe('Realtime against a mimicked node', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('the worker subscribes to its own subjects, from the typed domain', () => {
+  test('the worker subscribes to its own channels, from the typed domain', () => {
     expect([...node.subs.keys()]).toEqual(expect.arrayContaining([
-      `notifications.${node.userUuid}`,
-      `state.user.${node.userUuid}`,
+      idNotifications(node.userUuid),
+      idState(node.userUuid),
     ]));
   });
 
   test('a legacy tab:new notification opens the tab', async () => {
     const opened = ctx.waitForEvent('page', { timeout: 15_000 });
-    node.publish(`notifications.${node.userUuid}`,
+    node.publish(idNotifications(node.userUuid),
       { action: 'tab:new', url: `${node.origin}/popped` });
     const tab = await opened;
     expect(tab.url()).toContain('/popped');
   });
 
   test('a current-shape ringing event lands in chrome.storage as call:ringing', async () => {
-    node.publish(`notifications.${node.userUuid}`,
+    node.publish(idNotifications(node.userUuid),
       { type: 'agent', message: { type: 'ringing', call: { uuid: 'ci-call-1' }, screen: { uuid: 'scr-1' } } });
     const stored = await sw.evaluate(() => new Promise<string | null>((resolve) => {
       const read = () => chrome.storage.local.get('call', (v: any) =>

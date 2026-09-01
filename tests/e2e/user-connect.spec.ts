@@ -82,10 +82,10 @@ test.describe('User connect', () => {
    * config.ts still ships a hardcoded API_ENDPOINT (900.nimbusip.com) as the
    * background worker's fallback, so an extension that ignored the typed domain
    * would still log in — against someone else's node — and only reveal it by
-   * subscribing to the wrong bus. `_nats_url` is set before connect() is
-   * awaited, so this holds whether or not /nats is routed on this node yet.
+   * subscribing to the wrong server. `_cable_url` is set before connect() is
+   * awaited, so this holds whether or not /cable is routed on this node yet.
    */
-  test('the background worker targets wss://<typed domain>/nats', async ({ context, popupPage }) => {
+  test('the background worker targets wss://<typed domain>/cable', async ({ context, popupPage }) => {
     await popupPage.locator('input[formcontrolname="domain"]').fill(DOMAIN);
     await popupPage.locator('input[formcontrolname="username"]').fill(USERNAME);
     await popupPage.locator('input[formcontrolname="password"]').fill(PASSWORD);
@@ -95,16 +95,16 @@ test.describe('User connect', () => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    const natsUrl: string | null = await sw.evaluate(() =>
+    const cableUrl: string | null = await sw.evaluate(() =>
       new Promise(resolve => {
-        const read = () => (self as any)._nats_url as string | undefined;
+        const read = () => (self as any)._cable_url as string | undefined;
         if (read()) { resolve(read()!); return; }
         const id = setInterval(() => { const v = read(); if (v) { clearInterval(id); resolve(v); } }, 200);
         setTimeout(() => { clearInterval(id); resolve(null); }, 10_000);
       })
     );
 
-    expect(natsUrl, 'background worker never reached the NATS connect step').not.toBeNull();
-    expect(natsUrl).toBe(normalize(DOMAIN).replace(/^https?:\/\//, 'wss://') + '/nats');
+    expect(cableUrl, 'background worker never reached the cable connect step').not.toBeNull();
+    expect(cableUrl).toBe(normalize(DOMAIN).replace(/^https?:\/\//, 'wss://') + '/cable');
   });
 });
