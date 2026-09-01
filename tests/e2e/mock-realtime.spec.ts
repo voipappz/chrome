@@ -15,10 +15,7 @@ import { startFakeNode, type FakeNode } from './helpers/fake-node';
  */
 const EXT = path.resolve(__dirname, '../../angular/dist');
 
-// An ActionCable subscription is keyed by the EXACT identifier string, so these
-// must be byte-identical to what backgroundPage.ts sends — key order included.
-const idNotifications = (uuid: string) => JSON.stringify({ channel: 'Notifications', user_uuid: uuid });
-const idState = (uuid: string) => JSON.stringify({ channel: 'StateChannel', scope: 'user', id: uuid });
+
 
 test.describe('Realtime against a mimicked node', () => {
   let node: FakeNode;
@@ -47,10 +44,10 @@ test.describe('Realtime against a mimicked node', () => {
     await page.getByRole('button', { name: /login/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
-    // Live means the cable subscriptions were confirmed, not just navigated.
+    // Live means the socket authenticated and the server welcomed it.
     await expect
-      .poll(() => node.subs.has(idNotifications(node.userUuid))
-               && node.subs.has(idState(node.userUuid)), { timeout: 20_000 })
+      .poll(() => node.offeredProtocols.some((p) => p.startsWith('voipappz-bearer.')),
+            { timeout: 20_000 })
       .toBe(true);
   });
 
@@ -60,24 +57,26 @@ test.describe('Realtime against a mimicked node', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('the worker subscribes to its own channels, from the typed domain', () => {
-    expect([...node.subs.keys()]).toEqual(expect.arrayContaining([
-      idNotifications(node.userUuid),
-      idState(node.userUuid),
-    ]));
+  // The token must travel out of band. A regression to ?token= would still
+  // connect, and would still work — while writing the credential into every
+  // proxy and access log on the way.
+  test('the worker authenticates with a bearer subprotocol, not the URL', () => {
+    const bearer = node.offeredProtocols.find((p) => p.startsWith('voipappz-bearer.'));
+    expect(bearer, 'no voipappz-bearer.* subprotocol was offered').toBeTruthy();
+    expect(bearer!.length).toBeGreaterThan('voipappz-bearer.'.length);
   });
 
   test('a legacy tab:new notification opens the tab', async () => {
     const opened = ctx.waitForEvent('page', { timeout: 15_000 });
-    node.publish(idNotifications(node.userUuid),
-      { action: 'tab:new', url: `${node.origin}/popped` });
+    node.publish({ type: 'notification',
+      message: { action: 'tab:new', url: `${node.origin}/popped` } });
     const tab = await opened;
     expect(tab.url()).toContain('/popped');
   });
 
   test('a current-shape ringing event lands in chrome.storage as call:ringing', async () => {
-    node.publish(idNotifications(node.userUuid),
-      { type: 'agent', message: { type: 'ringing', call: { uuid: 'ci-call-1' }, screen: { uuid: 'scr-1' } } });
+    node.publish({ type: 'notification',
+      message: { type: 'agent', message: { type: 'ringing', call: { uuid: 'ci-call-1' }, screen: { uuid: 'scr-1' } } } });
     const stored = await sw.evaluate(() => new Promise<string | null>((resolve) => {
       const read = () => chrome.storage.local.get('call', (v: any) =>
         v && v.call ? resolve(v.call) : setTimeout(read, 200));

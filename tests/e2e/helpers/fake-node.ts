@@ -13,9 +13,9 @@ const { WebSocketServer } = require('ws');
  * extension talks to —
  *
  *   POST /auth/user_login   -> a canned {token, user:{uuid}} session
- *   GET  /cable (websocket) -> just enough ActionCable: welcome,
- *                              confirm_subscription, and data frames pushed
- *                              by the test
+ *   GET  /ws/events (websocket) -> the BFF's browser endpoint: welcome, then
+ *                              {type:"notification"|"user.state"} frames
+ *                              pushed by the test
  *
  * Exists so the receive path — subject naming, payload decoding, the
  * chrome.storage contract, openTab — runs on a hosted CI runner with no real
@@ -26,9 +26,10 @@ const { WebSocketServer } = require('ws');
 export interface FakeNode {
   origin: string;
   userUuid: string;
-  // identifier JSON (exactly as the client sent it) -> confirmed
-  subs: Map<string, boolean>;
-  publish(identifier: string, message: unknown): boolean;
+  // the bearer subprotocol the client offered, so a test can assert the token
+  // travelled out of band rather than in the URL
+  offeredProtocols: string[];
+  publish(frame: Record<string, unknown>): boolean;
   close(): Promise<void>;
 }
 
@@ -66,31 +67,24 @@ export async function startFakeNode(): Promise<FakeNode> {
     },
   );
 
-  const subs = new Map<string, boolean>();
+  const offeredProtocols: string[] = [];
   const sockets = new Set<any>();
-  const wss = new WebSocketServer({ server, path: '/cable' });
+  const wss = new WebSocketServer({ server, path: '/ws/events' });
 
   wss.on('connection', (ws: any, req: any) => {
-    // The subprotocol is required by the real server, so require it here too —
-    // otherwise a client that forgot it would pass the fake and fail in prod.
-    const proto = String(req.headers['sec-websocket-protocol'] || '');
-    if (!proto.includes('actioncable-v1-json')) { ws.close(); return; }
+    // The token rides a subprotocol, never the URL. Reject without one, so a
+    // client that regressed to a query parameter fails here rather than in
+    // production with the credential in an access log.
+    const offered = String(req.headers['sec-websocket-protocol'] || '')
+      .split(',').map((v: string) => v.trim()).filter(Boolean);
+    offeredProtocols.push(...offered);
+    if (!offered.some((v: string) => v.startsWith('voipappz-bearer.'))) { ws.close(); return; }
 
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    ws.send(JSON.stringify({ type: 'welcome' }));
-
-    ws.on('message', (data: Buffer) => {
-      let frame: any;
-      try { frame = JSON.parse(data.toString()); } catch { return; }
-      if (frame?.command === 'subscribe' && typeof frame.identifier === 'string') {
-        subs.set(frame.identifier, true);
-        // Echoed back VERBATIM: an ActionCable subscription is keyed by the
-        // exact identifier string, so a client matching on it must get the
-        // same bytes it sent.
-        ws.send(JSON.stringify({ type: 'confirm_subscription', identifier: frame.identifier }));
-      }
-    });
+    // Per-user streams are opened server-side from the token's claims, so the
+    // client subscribes to nothing — welcome is the whole handshake.
+    ws.send(JSON.stringify({ type: 'welcome', ts: new Date().toISOString(), subscribed: [], clients: sockets.size, cable_ready: true }));
   });
 
   await new Promise<void>((r) => server.listen(0, r)); // all interfaces: Chrome may resolve localhost to ::1
@@ -99,13 +93,11 @@ export async function startFakeNode(): Promise<FakeNode> {
   return {
     origin: `https://localhost:${port}`,
     userUuid,
-    subs,
-    publish(identifier, message) {
-      if (!subs.has(identifier)) return false;
-      // A data frame carries identifier + message and NO type — that absence
-      // is what tells a client it is data rather than protocol traffic.
-      const frame = JSON.stringify({ identifier, message });
-      for (const ws of sockets) ws.send(frame);
+    offeredProtocols,
+    publish(frame) {
+      if (!sockets.size) return false;
+      const body = JSON.stringify(frame);
+      for (const ws of sockets) ws.send(body);
       return true;
     },
     close: () =>

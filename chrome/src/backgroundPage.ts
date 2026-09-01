@@ -1,21 +1,26 @@
 import { CONFIG } from "../../angular/src/app/config"
 
-// ActionCable over WSS, not a broker connection. The cable server (the
-// va-crystal node, /cable) authenticates the SAME token the popup already
-// holds — HS256, `user_uuid`, signed with the node's SECRET_KEY — so a browser
-// gets per-user authorization with no second credential. Talking to NATS
-// directly cannot do that: subject permissions are static, so a shipped client
-// would need `notifications.>` and a shared password, which reads every
-// tenant's calls. Cable is NATS-backed anyway (Cable::NATSBackend), so the
-// events are identical; only the browser's hop changes.
-const CABLE_PROTOCOL = "actioncable-v1-json";
+// The app BFF's browser endpoint (/ws/events), not the cable server and not
+// the broker.
+//
+// The BFF holds ONE ActionCable connection per browser client, authorized by
+// that person's own login token, and derives which streams they get from that
+// token's claims — so which user's events arrive is never something the client
+// asks for. Talking to cable directly would mean sending our own user_uuid and
+// being trusted on it; talking to NATS directly cannot be scoped per user at
+// all. Same events either way: the BFF subscribes to cable, which is
+// NATS-backed.
+//
+// The token travels as a SUBPROTOCOL, not a query parameter — browsers cannot
+// set Authorization on a WebSocket handshake, and a URL is recorded by every
+// reverse proxy and access log in between.
+const BEARER_PREFIX = "voipappz-bearer.";
 
 let ws: WebSocket | null = null;
 let currentUuid = "";
 let currentToken = "";
-let cableUrl = "";
+let realtimeUrl = "";
 let reconnectTimer: any = null;
-let identifiers: { notifications: string; state: string } | null = null;
 
 var TAB_ID = 0;
 console.log('background script loaded');
@@ -38,16 +43,6 @@ function onConnect(port) {
     });
 }
 
-// An ActionCable subscription is keyed by the EXACT JSON string of its
-// identifier — the server echoes it back verbatim, so the client must match on
-// the same string it sent. Key order is part of the identity.
-function ids(uuid: string) {
-    return {
-        notifications: JSON.stringify({ channel: "Notifications", user_uuid: uuid }),
-        state: JSON.stringify({ channel: "StateChannel", scope: "user", id: uuid }),
-    };
-}
-
 async function login(msg: any, port: any) {
     const uuid = msg.data.user_uuid;
     const token = msg.data.token || "";
@@ -57,37 +52,36 @@ async function login(msg: any, port: any) {
     disconnect();
 
     const domain = (msg.domain || CONFIG.API_ENDPOINT).replace(/\/+$/, '');
-    cableUrl = domain.replace(/^https?:\/\//, "wss://") + "/cable";
+    realtimeUrl = domain.replace(/^https?:\/\//, "wss://") + "/ws/events";
     currentUuid = uuid;
     currentToken = token;
-    identifiers = ids(uuid);
     // Exposed on self so Playwright can verify the target before a connection
     // is even attempted.
-    (self as any)._cable_url = cableUrl;
+    (self as any)._realtime_url = realtimeUrl;
 
     openSocket(port);
 }
 
 function openSocket(port?: any) {
-    if (!currentUuid || !cableUrl) return;
+    if (!currentUuid || !realtimeUrl) return;
 
-    const url = cableUrl + "?token=" + encodeURIComponent(currentToken);
     let sock: WebSocket;
     try {
-        // The subprotocol is REQUIRED: the server advertises
-        // actioncable-v1-json, and a client that does not request it fails the
-        // handshake outright.
-        sock = new WebSocket(url, [CABLE_PROTOCOL]);
+        // base64url, unpadded — the server decodes it by mapping -/_ back and
+        // re-padding, so + / = must not appear.
+        const encoded = btoa(currentToken)
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        sock = new WebSocket(realtimeUrl, [BEARER_PREFIX + encoded]);
     } catch (err) {
-        console.error("cable connect failed", cableUrl, err);
+        console.error("cable connect failed", realtimeUrl, err);
         scheduleReconnect();
         return;
     }
     ws = sock;
-    (self as any)._cable = sock;
+    (self as any)._realtime = sock;
 
     sock.onopen = () => {
-        console.log("cable socket open", cableUrl);
+        console.log("cable socket open", realtimeUrl);
     };
 
     sock.onmessage = (ev) => {
@@ -97,29 +91,25 @@ function openSocket(port?: any) {
         } catch (e) {
             return;
         }
-        if (!frame) return;
+        if (!frame || !frame.type) return;
 
-        // Dispatch rule from the protocol: a frame carrying `type` is protocol
-        // traffic (welcome / ping / confirm / reject / disconnect). Anything
-        // else is data, routed by its identifier.
-        if (frame.type) {
-            if (frame.type === "welcome") {
-                subscribe(sock);
-                try { port && port.postMessage("connected to cable"); } catch (e) { /* popup closed */ }
-            } else if (frame.type === "disconnect") {
-                console.warn("cable disconnected by server", frame);
-            } else if (frame.type === "reject_subscription") {
-                console.error("cable rejected subscription", frame.identifier);
-            }
-            // ping frames carry no identifier and need no reply
-            return;
-        }
-
-        if (!identifiers) return;
-        if (frame.identifier === identifiers.notifications) {
-            handleNotification(frame.message);
-        } else if (frame.identifier === identifiers.state) {
-            handleUserState(frame.message);
+        // Every per-user stream is opened server-side from the token's claims,
+        // so there is nothing to subscribe to and no uuid to send.
+        switch (frame.type) {
+            case "welcome":
+                console.log("realtime connected", realtimeUrl, "cable_ready:", frame.cable_ready);
+                try { port && port.postMessage("connected to realtime"); } catch (e) { /* popup closed */ }
+                break;
+            case "notification":
+                // `message` is the Notifications payload verbatim — the same
+                // shape this worker has always parsed.
+                handleNotification(frame.message);
+                break;
+            case "user.state":
+                // The BFF already folded the deltas into `view`; `message` is
+                // the raw state document, which is what handleUserState stores.
+                handleUserState(frame.message);
+                break;
         }
     };
 
@@ -129,17 +119,6 @@ function openSocket(port?: any) {
     sock.onerror = (err) => {
         console.error("cable socket error", err);
     };
-}
-
-function subscribe(sock: WebSocket) {
-    if (!identifiers) return;
-    // Registration is asynchronous and unbuffered: anything published between
-    // `subscribe` and the server registering the stream is simply not
-    // delivered. Nothing here depends on that window, but it is why a test
-    // must wait for confirm_subscription before publishing.
-    sock.send(JSON.stringify({ command: "subscribe", identifier: identifiers.notifications }));
-    sock.send(JSON.stringify({ command: "subscribe", identifier: identifiers.state }));
-    console.log("subscribed to Notifications + StateChannel for", currentUuid);
 }
 
 // MV3 kills an idle service worker in ~30s. Incoming socket traffic resets that
@@ -157,11 +136,10 @@ function scheduleReconnect() {
 function disconnect() {
     currentUuid = "";
     currentToken = "";
-    identifiers = null;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     const sock = ws;
     ws = null;
-    (self as any)._cable = null;
+    (self as any)._realtime = null;
     if (sock) {
         try { sock.close(); } catch (e) { /* already closed */ }
     }
