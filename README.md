@@ -1,119 +1,80 @@
 # VoIPAppz Chrome Extension
 
-A Chrome extension for VoIPAppz agents. It signs in against a VoIPAppz node and
-opens a live connection for realtime events — screen pops, call state and agent
-availability — so an incoming call can pop the caller's CRM record automatically.
+Screen pops, call state and agent availability, live in the browser.
 
 ## Install
 
-The extension is distributed as a zip, not through the Chrome Web Store, so it
-is installed "unpacked" from a folder on your machine.
+```mermaid
+flowchart TD
+    A["⬇️ Download <b>extension-build.zip</b><br/><i>from Releases</i>"] --> B
+    B["📂 Unzip to a folder you keep<br/><i>~/voipappz-extension</i>"] --> C
+    C["🌐 Open <b>chrome://extensions</b><br/><i>type it — links don't work</i>"] --> D
+    D["🛠️ Toggle <b>Developer mode</b><br/><i>top right</i>"] --> E
+    E["📦 <b>Load unpacked</b> → pick the folder<br/><i>the one holding manifest.json</i>"] --> F
+    F["📌 Pin <b>Nimbus</b><br/><i>puzzle-piece icon</i>"] --> G
+    G["🔑 Click the icon and sign in"]
 
-1. Download **`extension-build.zip`** from the
-   [latest release](https://github.com/voipappz/chrome/releases/latest).
-2. **Unzip it into a folder you intend to keep** — for example
-   `C:\voipappz-extension` or `~/voipappz-extension`. Chrome does not copy the
-   files; it loads them from this folder every time it starts. Move or delete
-   the folder and the extension breaks.
-3. Open `chrome://extensions` (type it into the address bar — it cannot be
-   reached from a link).
-4. Turn on **Developer mode** with the toggle in the top-right corner.
-5. Click **Load unpacked** (top-left, appears only once Developer mode is on)
-   and select the folder you unzipped in step 2. Select the folder *containing*
-   `manifest.json`, not the file itself.
-6. Pin it so the icon stays visible: click the puzzle-piece icon in the toolbar,
-   then the pin next to **Nimbus**.
+    style A fill:#e8f0fe,stroke:#4285f4,color:#111
+    style G fill:#e6f4ea,stroke:#34a853,color:#111
+```
 
-### What to expect afterwards
+[**Download the latest release →**](https://github.com/voipappz/chrome/releases/latest)
 
-**Chrome will ask, every time it starts, whether to keep the extension.** This
-is deliberate on Chrome's part — it is how it stops software installing
-extensions behind your back — and it applies to every unpacked extension, not
-just this one. Choose to keep it. The prompt goes away only for extensions
-installed from the Web Store.
+Chrome loads the extension *from* that folder every start — it does not copy it.
+Move or delete the folder and the extension breaks.
 
-You will also see a standing "Disable developer mode extensions" warning. It is
-expected, and dismissing it does not uninstall anything.
+### Two things that look like failures but aren't
 
-### If something goes wrong
+- **Chrome asks at every start whether to keep it.** Deliberate: it's how Chrome
+  stops extensions being installed behind your back. Applies to every unpacked
+  extension. Choose keep.
+- **A standing "disable developer mode extensions" warning.** Expected.
+
+Both stop only for Web Store installs.
+
+### If it doesn't work
 
 | Symptom | Cause |
 |---|---|
-| **Load unpacked** button missing | Developer mode is off |
-| "Manifest file is missing or unreadable" | You selected the zip, or a folder one level too high or too low — pick the folder that directly contains `manifest.json` |
-| Extension vanished after a restart | The unzipped folder was moved, renamed or deleted, or the startup prompt was declined |
-| Icon not visible | Not pinned — puzzle-piece icon → pin **Nimbus** |
+| No **Load unpacked** button | Developer mode is off |
+| "Manifest file is missing or unreadable" | You picked the zip, or the wrong folder level — pick the one directly holding `manifest.json` |
+| Gone after restarting Chrome | Folder moved or deleted, or the startup prompt was declined |
+| No icon in the toolbar | Not pinned |
 
-## Logging in
+## Sign in
 
-Click the extension icon. The popup asks for three things:
-
-| Field | What to enter |
+| Field | Value |
 |---|---|
-| **Domain** | Your VoIPAppz node's address, e.g. `https://pbx.example.com`. `https://` is added if you leave the scheme off. |
-| **Username** | Your **user** email address. |
-| **Password** | That user's password. |
+| **Domain** | Your node, e.g. `https://pbx.example.com` |
+| **Username** | Your **user** email address |
+| **Password** | That user's password |
 
-Two things people get wrong here:
+Both of these return a generic `Invalid email or password`:
 
-- **This is a user login, not your portal account login.** The extension posts
-  to `/auth/user_login`, which reads the *users* table. Your portal sign-in is a
-  separate credential in a separate table, and it will be rejected here. If you
-  administer the node, `make onboard` prints the right one on the line labelled
-  **Extension login**.
-- **Plus-addressing does not work.** The server rejects `+` in the local part of
-  the address before it ever checks the password, and the error you get back is
-  the generic "Invalid email or password".
+- **It's the user login, not your portal account** — different credential,
+  different table. Admins: `make onboard` prints it as **Extension login**.
+- **`+` in the address is rejected** before the password is even checked.
 
-After a successful sign-in the popup shows your name, an availability selector
-and the current call card. The session persists — reopening the popup does not
-ask you to sign in again. **Logout** (top right) clears it.
+## Realtime feed
 
-If the tenant has OTP enabled for user logins, sign-in will fail: the extension
-has no OTP step.
+Sign-in works against any node serving `/auth/user_login`. Events additionally
+need a NATS `websocket` listener, a `/nats` route at the edge, and a NATS user
+matching the credential in `chrome/src/backgroundPage.ts`. **That user is not
+configured yet** — the shared credential would need a wildcard
+`notifications.>` subscribe, which is a cross-tenant read. Per-user scoping via
+NATS `auth_callout` is the intended fix; until then the feed is inert.
 
-## What you get once connected
-
-- **Screen pop** — an inbound call opens the caller's CRM record in a new tab
-- **Call state** — ringing / answered / hung up, reflected in the popup
-- **Agent state** — availability and status, live
-
-## Node requirements
-
-Sign-in works against any node serving `/auth/user_login`. The **realtime feed**
-needs two more things, or you will sign in successfully and never receive an
-event:
-
-1. a NATS `websocket` listener on the node, and a `/nats` route at the edge
-   proxying to it
-2. a NATS user matching the credential in `chrome/src/backgroundPage.ts`
-
-(1) ships in the mothership stack. (2) is **not configured yet** — the extension
-presents a shared credential, which would need a wildcard `notifications.>`
-subscribe permission to work, and that is a cross-tenant read. Per-user scoping
-(NATS `auth_callout`, where the extension presents its login JWT instead) is the
-intended fix. Until then the realtime half is inert.
-
-## Development
+## Develop
 
 ```bash
 npm ci --legacy-peer-deps
-npm run watch                     # rebuild on change into angular/dist
+npm run watch                                            # → angular/dist
+NODE_OPTIONS=--openssl-legacy-provider npm run build:production
+npm run test:e2e                                         # needs TEST_DOMAIN/USERNAME/PASSWORD
 ```
 
-Load `angular/dist` as the unpacked extension. Changes to the **background** and
-**content** scripts need a reload in `chrome://extensions`; popup changes do not.
+Load `angular/dist` unpacked. Background and content script changes need a
+reload in `chrome://extensions`; popup changes don't. The legacy OpenSSL flag is
+required on Node 17+ (webpack 4).
 
-```bash
-npm run build:production          # produces extension-build.zip
-npm run test:e2e                  # Playwright, needs TEST_DOMAIN/USERNAME/PASSWORD
-```
-
-On Node 17+ the production build needs `NODE_OPTIONS=--openssl-legacy-provider`
-(webpack 4 uses a hash OpenSSL 3 no longer offers). Only the `build:chrome*`
-scripts set it, so export it for the full `build:production` run.
-
-## Layout
-
-- `angular/` — the popup UI (Angular; each feature is a lazily-loaded module under `angular/src/app/modules`)
-- `chrome/src/` — the background service worker and content script
+`angular/` is the popup UI, `chrome/src/` the background worker and content script.
