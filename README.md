@@ -6,13 +6,13 @@ Screen pops, call state and agent availability, live in the browser.
 
 ```mermaid
 flowchart TD
-    A["⬇️ Download <b>extension-build.zip</b><br/><i>from Releases</i>"] --> B
-    B["📂 Unzip to a folder you keep<br/><i>~/voipappz-extension</i>"] --> C
-    C["🌐 Open <b>chrome://extensions</b><br/><i>type it — links don't work</i>"] --> D
-    D["🛠️ Toggle <b>Developer mode</b><br/><i>top right</i>"] --> E
-    E["📦 <b>Load unpacked</b> → pick the folder<br/><i>the one holding manifest.json</i>"] --> F
-    F["📌 Pin <b>Nimbus</b><br/><i>puzzle-piece icon</i>"] --> G
-    G["🔑 Click the icon and sign in"]
+    A["⬇️  Download extension-build.zip<br/>from Releases"] --> B
+    B["📂  Unzip to a folder you keep<br/>~/voipappz-extension"] --> C
+    C["🌐  Open chrome://extensions<br/>type it — links don't work"] --> D
+    D["🛠️  Toggle Developer mode<br/>top right"] --> E
+    E["📦  Load unpacked → pick the folder<br/>the one holding manifest.json"] --> F
+    F["📌  Pin Nimbus<br/>puzzle-piece icon"] --> G
+    G["🔑  Click the icon and sign in"]
 
     style A fill:#e8f0fe,stroke:#4285f4,color:#111
     style G fill:#e6f4ea,stroke:#34a853,color:#111
