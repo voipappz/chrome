@@ -1,63 +1,90 @@
-# @larscom/ng-chrome-extension
+# VoIPAppz Chrome Extension
 
-[![npm-release](https://img.shields.io/npm/v/@larscom/ng-chrome-extension.svg?label=npm)](https://www.npmjs.com/package/@larscom/ng-chrome-extension)
-[![@larscom/ng-chrome-extension](https://github.com/larscom/ng-chrome-extension/workflows/@larscom/ng-chrome-extension/badge.svg?branch=master)](https://github.com/larscom/ng-chrome-extension)
-[![license](https://img.shields.io/npm/l/@larscom/ng-chrome-extension)](https://github.com/larscom/ng-chrome-extension/blob/master/LICENSE)
-![npm](https://img.shields.io/npm/dw/@larscom/ng-chrome-extension)
+A Chrome extension for VoIPAppz agents. It signs in against a VoIPAppz node and
+opens a live connection for realtime events — screen pops, call state and agent
+availability — so an incoming call can pop the caller's CRM record automatically.
 
-Easily create Google Chrome Extensions using the `latest` version of Angular.
+## Install
 
-The following scenarios/options are supported:
+1. Download `extension-build.zip` from the [latest release](https://github.com/voipappz/chrome/releases/latest).
+2. Unzip it into a folder you'll keep — Chrome loads the extension *from* this
+   folder, so deleting it uninstalls the extension.
+3. Open `chrome://extensions`.
+4. Turn on **Developer mode** (top right).
+5. Click **Load unpacked** and select the unzipped folder.
+6. Pin the extension so its icon stays visible: click the puzzle-piece icon in
+   the toolbar, then the pin next to **Nimbus**.
 
-- Popup &#10003;
-- New Tab &#10003;
-- Options &#10003;
-- Background Page &#10003;
-- Content Page &#10003;
+## Logging in
 
-## How to install
+Click the extension icon. The popup asks for three things:
+
+| Field | What to enter |
+|---|---|
+| **Domain** | Your VoIPAppz node's address, e.g. `https://pbx.example.com`. `https://` is added if you leave the scheme off. |
+| **Username** | Your **user** email address. |
+| **Password** | That user's password. |
+
+Two things people get wrong here:
+
+- **This is a user login, not your portal account login.** The extension posts
+  to `/auth/user_login`, which reads the *users* table. Your portal sign-in is a
+  separate credential in a separate table, and it will be rejected here. If you
+  administer the node, `make onboard` prints the right one on the line labelled
+  **Extension login**.
+- **Plus-addressing does not work.** The server rejects `+` in the local part of
+  the address before it ever checks the password, and the error you get back is
+  the generic "Invalid email or password".
+
+After a successful sign-in the popup shows your name, an availability selector
+and the current call card. The session persists — reopening the popup does not
+ask you to sign in again. **Logout** (top right) clears it.
+
+If the tenant has OTP enabled for user logins, sign-in will fail: the extension
+has no OTP step.
+
+## What you get once connected
+
+- **Screen pop** — an inbound call opens the caller's CRM record in a new tab
+- **Call state** — ringing / answered / hung up, reflected in the popup
+- **Agent state** — availability and status, live
+
+## Node requirements
+
+Sign-in works against any node serving `/auth/user_login`. The **realtime feed**
+needs two more things, or you will sign in successfully and never receive an
+event:
+
+1. a NATS `websocket` listener on the node, and a `/nats` route at the edge
+   proxying to it
+2. a NATS user matching the credential in `chrome/src/backgroundPage.ts`
+
+(1) ships in the mothership stack. (2) is **not configured yet** — the extension
+presents a shared credential, which would need a wildcard `notifications.>`
+subscribe permission to work, and that is a cross-tenant read. Per-user scoping
+(NATS `auth_callout`, where the extension presents its login JWT instead) is the
+intended fix. Until then the realtime half is inert.
+
+## Development
 
 ```bash
-npm install -g @larscom/ng-chrome-extension
+npm ci --legacy-peer-deps
+npm run watch                     # rebuild on change into angular/dist
 ```
 
-## Start creating a new project
+Load `angular/dist` as the unpacked extension. Changes to the **background** and
+**content** scripts need a reload in `chrome://extensions`; popup changes do not.
 
 ```bash
-ng-chrome
+npm run build:production          # produces extension-build.zip
+npm run test:e2e                  # Playwright, needs TEST_DOMAIN/USERNAME/PASSWORD
 ```
 
-![alt text](https://snipboard.io/OYcNzx.jpg 'ng-chrome CLI')
+On Node 17+ the production build needs `NODE_OPTIONS=--openssl-legacy-provider`
+(webpack 4 uses a hash OpenSSL 3 no longer offers). Only the `build:chrome*`
+scripts set it, so export it for the full `build:production` run.
 
-## How to use/develop
+## Layout
 
-- change directory to your newly created project
-- run `npm run start`
-- goto: `chrome://extensions` in the browser and enable `'developer mode'`
-- press `Load unpacked` and target the folder `angular/dist`
-
-The project is automatically being watched, any changes to the files will recompile the project.
-
-**NOTE**: changes to the **content page** and **background page** scripts requires you to reload the extension in `chrome://extensions`
-
-![alt text](https://snipboard.io/KToCI3.jpg 'Angular Chrome Popup')
-![alt text](https://snipboard.io/VYfGoD.jpg 'Angular Chrome Tab')
-
-## Build/package for production
-
-- update version number inside `./angular/src/manifest.json`
-- run `npm run build:production`
-- upload `extension-build.zip` to the chrome webstore.
-
-This will run a production build and will automatically zip it as a extension package in the root folder named: `extension-build.zip`
-
-## Angular folder
-
-This folder contains the angular source code.
-Each feature (popup,options,tab) lives inside its own module and gets lazily loaded.
-
-see: `./angular/src/app/modules`
-
-## Chrome folder
-
-This folder contains the content page/background page scripts.
+- `angular/` — the popup UI (Angular; each feature is a lazily-loaded module under `angular/src/app/modules`)
+- `chrome/src/` — the background service worker and content script
