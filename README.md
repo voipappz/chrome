@@ -6,14 +6,43 @@ availability — so an incoming call can pop the caller's CRM record automatical
 
 ## Install
 
-1. Download `extension-build.zip` from the [latest release](https://github.com/voipappz/chrome/releases/latest).
-2. Unzip it into a folder you'll keep — Chrome loads the extension *from* this
-   folder, so deleting it uninstalls the extension.
-3. Open `chrome://extensions`.
-4. Turn on **Developer mode** (top right).
-5. Click **Load unpacked** and select the unzipped folder.
-6. Pin the extension so its icon stays visible: click the puzzle-piece icon in
-   the toolbar, then the pin next to **Nimbus**.
+The extension is distributed as a zip, not through the Chrome Web Store, so it
+is installed "unpacked" from a folder on your machine.
+
+1. Download **`extension-build.zip`** from the
+   [latest release](https://github.com/voipappz/chrome/releases/latest).
+2. **Unzip it into a folder you intend to keep** — for example
+   `C:\voipappz-extension` or `~/voipappz-extension`. Chrome does not copy the
+   files; it loads them from this folder every time it starts. Move or delete
+   the folder and the extension breaks.
+3. Open `chrome://extensions` (type it into the address bar — it cannot be
+   reached from a link).
+4. Turn on **Developer mode** with the toggle in the top-right corner.
+5. Click **Load unpacked** (top-left, appears only once Developer mode is on)
+   and select the folder you unzipped in step 2. Select the folder *containing*
+   `manifest.json`, not the file itself.
+6. Pin it so the icon stays visible: click the puzzle-piece icon in the toolbar,
+   then the pin next to **Nimbus**.
+
+### What to expect afterwards
+
+**Chrome will ask, every time it starts, whether to keep the extension.** This
+is deliberate on Chrome's part — it is how it stops software installing
+extensions behind your back — and it applies to every unpacked extension, not
+just this one. Choose to keep it. The prompt goes away only for extensions
+installed from the Web Store.
+
+You will also see a standing "Disable developer mode extensions" warning. It is
+expected, and dismissing it does not uninstall anything.
+
+### If something goes wrong
+
+| Symptom | Cause |
+|---|---|
+| **Load unpacked** button missing | Developer mode is off |
+| "Manifest file is missing or unreadable" | You selected the zip, or a folder one level too high or too low — pick the folder that directly contains `manifest.json` |
+| Extension vanished after a restart | The unzipped folder was moved, renamed or deleted, or the startup prompt was declined |
+| Icon not visible | Not pinned — puzzle-piece icon → pin **Nimbus** |
 
 ## Logging in
 
