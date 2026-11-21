@@ -1,0 +1,25 @@
+# How VoipAppz Builder runs the Chrome extension (Builder's "Chrome
+# extension" platform): the first time `make setup` (node through mise, the
+# packages, Chromium for the tests), then `make dev`, which keeps dist/ live
+# and serves the popup as a page on :5175. Builder shows that page beside its
+# chat while the coding agent edits. To try it inside Chrome itself, load
+# dist/ in chrome://extensions (Load unpacked).
+[builder]
+kind = "product"
+name = "VoipAppz Chrome extension"
+port = 5175
+health = "/index.html"
+page = "/index.html"
+setup_done = "node_modules"
+start_timeout = 600
+requires = ["make", "mise"]
+
+[[builder.actions]]
+id = "test"
+label = "Run tests"
+make = "test"
+
+[[builder.actions]]
+id = "pack"
+label = "Pack extension (zip)"
+make = "pack"
