@@ -1,0 +1,65 @@
+# Lint, unit tests, build, then the offline e2e specs in a real Chrome with the
+# built extension loaded. Same steps as `make test` locally.
+#
+# The e2e here is the offline suite: a fake node started by the spec, so no
+# server, credentials or secrets. The live specs (real user, real switch) need
+# their env and run by hand; see README.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      # Extensions only load in Chrome's "new" headless mode, which the specs
+      # select themselves (--headless=new); no display server is needed.
+      - name: End-to-end (offline, fake node)
+        run: npm run test:e2e -- mock-realtime
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extension
+          path: dist/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          if-no-files-found: ignore

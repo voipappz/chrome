@@ -1,0 +1,62 @@
+# The agent Chrome extension
+
+Screen pops for agents. When the agent's call reaches a point that has a
+screen, the extension opens it in a new tab. It also shows the call state and
+the agent's availability in the toolbar popup.
+
+It replaces the Angular 11 build (`voipappz/chrome`) with React 19, Vite,
+MUI 7 and CRXJS. The behaviour is unchanged, ported one-for-one. The plan and
+open work are in [PLAN.md](PLAN.md).
+
+## Commands
+
+Node 22 comes from `mise.toml`; every target runs through `mise exec`.
+
+| Target | What it does |
+| --- | --- |
+| `make setup` | Installs node, the dependencies and Chromium for the e2e specs. |
+| `make build` | Builds into `dist/`. In `chrome://extensions`, turn on Developer mode, then **Load unpacked** that folder. |
+| `make dev` | Keeps `dist/` live (HMR inside the extension). The popup also opens as a plain page at <http://localhost:5175/index.html>. |
+| `make test` | Lint, unit tests, then the offline e2e specs in a real Chrome. CI (`.github/workflows/ci.yml`) runs the same. |
+| `make e2e SPEC=login` | One Playwright spec; see the table at the end for the env the live ones need. |
+| `make pack` | Zips `dist/` to `extension-build.zip`. `EXT_VERSION=0.0.11` overrides the version. Nothing is published. |
+
+## How it works
+
+```
+popup (index.html)            service worker (background.js)        portal
+  login  ── POST /auth/user_login ─────────────────────────────────▶  /auth/user_login
+  main   ── runtime port {event:"login", token} ─▶ WebSocket ──────▶  /ws/events
+         ◀── {event:"realtime"|"call"} ──────────  ◀── notification ──
+                                                   tab:new → chrome.tabs.create(url)
+```
+
+- **The popup** signs in and stores the session in its `localStorage`
+  (`_token`, `_id`, `_domain`; see `src/session.js`). Then it hands the session
+  to the worker over a runtime port. The worker has no storage of its own.
+- **The worker** holds one socket to the portal's `/ws/events`. The token goes
+  as a `voipappz-bearer.*` subprotocol, never in the URL. On a `tab:new`
+  notification it opens the tab. Call events and the connection state go to
+  any open popup, and nothing is persisted. The wire contract is
+  [REALTIME_CONTRACT.md](REALTIME_CONTRACT.md). The routing of each
+  notification is in `src/realtime.js`, with unit tests.
+- **The host** is `CONFIG.API_ENDPOINT` in `src/config.js`, one per customer
+  build, with `CUSTOMER` beside it. `localStorage._domain` overrides it at
+  runtime, and that override is how the e2e specs aim at a fake node.
+
+The popup's theme (`src/popup/theme.js`) keeps the indigo look of the Angular
+build, with an Emotion cache that mirrors styles for the Hebrew main page.
+
+## e2e specs (`tests/e2e`)
+
+| Spec | Needs |
+| --- | --- |
+| `mock-realtime` | Nothing. A fake HTTPS node with `/ws/events`, started by the spec. |
+| `login`, `user-connect` | `TEST_DOMAIN`, `TEST_USERNAME`, `TEST_PASSWORD`. The USER login (users table), not the account one. |
+| `portal-login` | A portal on `http://localhost:4001` (or `TEST_DOMAIN`). |
+| `portal-receive` | `CABLE_EVENTS=1` and the cable-events compose stack (`CABLE_EVENTS_COMPOSE` points at it). |
+| `real-receive` | `TEST_RECEIVE=1`, driven by a shell harness. |
+
+```
+make e2e SPEC=login TEST_DOMAIN=http://localhost:4001 TEST_USERNAME=... TEST_PASSWORD=...
+```

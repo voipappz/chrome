@@ -1,0 +1,3 @@
+# The tools the Chrome extension builds with. `mise install` installs them.
+[tools]
+node = "22"
