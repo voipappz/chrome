@@ -29,15 +29,13 @@ async function request(path, { method = 'GET', body, params, auth = true } = {})
   return data;
 }
 
-/** POST /auth/user_login: the USER front door (users table), not the account one. */
+/**
+ * POST /auth/user_login: the USER front door (users table), not the account
+ * one. Credentials in the body only: a query string is written to every proxy
+ * and access log on the way, password included.
+ */
 export function login(email, password) {
-  // Sent both as query and body, as the Angular build did: the portal relays
-  // whichever the API it fronts reads.
-  return request(`/auth/user_login?${new URLSearchParams({ email, password })}`, {
-    method: 'POST',
-    body: { email, password },
-    auth: false,
-  });
+  return request('/auth/user_login', { method: 'POST', body: { email, password }, auth: false });
 }
 
 export const getUser = (uuid) => request(`/api/users/${uuid}`);

@@ -21,7 +21,8 @@ describe('requests', () => {
     vi.stubGlobal('fetch', fetch);
     await login('a@b.c', 'pw');
     const [url, init] = fetch.mock.calls[0];
-    expect(String(url)).toBe('https://portal.example/auth/user_login?email=a%40b.c&password=pw');
+    expect(String(url)).toBe('https://portal.example/auth/user_login');
+    expect(JSON.parse(init.body)).toEqual({ email: 'a@b.c', password: 'pw' });
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBeUndefined();
   });

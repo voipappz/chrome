@@ -1,34 +1,31 @@
 import { CONFIG } from './config.js';
-import { bearerProtocol, callFrame, realtimeUrl, routeNotification } from './realtime.js';
+import { CABLE_PROTOCOL, STALE_AFTER_MS, cableUrl, classify, identifiers, redact, subscribeCommand, withToken } from './cable.js';
+import { callFrame, routeNotification } from './realtime.js';
 
-// The service worker: holds the realtime socket, opens screen-pop tabs, and
-// tells the popup what it knows. Ported line for line from the Angular build's
-// chrome/src/backgroundPage.ts; the behaviour is the same.
-//
-// The realtime server is the portal's /ws/events, a settled decision. The
-// server authorizes the socket by the person's own login token and derives
-// which streams they get from that token's claims, so which user's events
-// arrive is never something the client asks for. That is the reason for going
-// through it: talking to cable directly would mean sending our own user_uuid
-// and being trusted on it. Contract: extension/REALTIME_CONTRACT.md.
+// The service worker: holds the cable socket, opens screen-pop tabs, and tells
+// the popup what it knows. The behaviour is the Angular build's
+// (voipappz/chrome, chrome/src/backgroundPage.ts); only the transport is cable
+// instead of the portal's /ws/events. Protocol notes: CABLE_CONTRACT.md.
 
 let ws = null;
 let currentUuid = '';
 let currentToken = '';
 let currentUrl = '';
+let ids = null;
 let reconnectTimer = null;
+let staleTimer = null;
+let refused = false; // the server said reconnect:false (token refused): stop retrying
 
 // ── the realtime light ───────────────────────────────────────────────────────
 //
 // NOTHING IS STORED. The worker holds the state in memory and pushes it down
 // the port the popup opens; a popup that opens later asks with
 // {event:"status"} and gets an answer by return. MV3 stops the worker and the
-// socket dies with it, so a stored "connected" would be wrong the moment it was
-// written.
+// socket dies with it, so a stored "connected" would be wrong once written.
 //
-// GREEN IS NOT "the socket opened". It is open AND the server said its cable is
-// ready: a portal whose cable is down accepts the socket and then delivers
-// nothing, and a light that stays green through that is worse than none.
+// GREEN IS NOT "the socket opened". It is `welcome` AND the Notifications
+// subscription confirmed: that is the moment a screen pop can arrive. Amber is
+// connected but not (yet) subscribed, or the subscription was rejected.
 let realtimeState = { connected: false, cable_ready: false };
 
 // Every popup that has connected. A Set because the same page reconnects on
@@ -38,8 +35,6 @@ const ports = new Set();
 // A popup opens long after the call it needs to draw arrived, so the last one
 // is replayed to it. In memory only: it is worth exactly as long as the worker.
 let lastCall = null;
-
-let popTabId = 0;
 
 function setRealtimeState({ connected, cable_ready }) {
   realtimeState = { connected, cable_ready: connected ? !!cable_ready : false };
@@ -76,7 +71,7 @@ function paintBadge() {
       title: !currentUuid
         ? CONFIG.PAGE_TITLE
         : green ? `${CONFIG.PAGE_TITLE} — connected`
-          : amber ? `${CONFIG.PAGE_TITLE} — connected, cable not ready`
+          : amber ? `${CONFIG.PAGE_TITLE} — connected, not subscribed`
             : `${CONFIG.PAGE_TITLE} — disconnected`,
     });
   } catch { /* action API unavailable in tests */ }
@@ -103,65 +98,100 @@ function onConnect(port) {
 
 function login(msg) {
   const uuid = msg.data.user_uuid;
-  if (ws && ws.readyState === WebSocket.OPEN && currentUuid === uuid) return;
+  const token = msg.data.token || '';
+  if (ws && ws.readyState === WebSocket.OPEN && currentUuid === uuid && currentToken === token) return;
   disconnect();
 
-  currentUrl = realtimeUrl(msg.domain || CONFIG.API_ENDPOINT);
+  currentUrl = msg.cable || cableUrl(msg.domain || CONFIG.API_ENDPOINT, CONFIG.CABLE_URL);
   currentUuid = uuid;
-  currentToken = msg.data.token || '';
-  // Exposed on self so Playwright can verify the target before a connection is
-  // even attempted.
-  self._realtime_url = currentUrl;
+  currentToken = token;
+  ids = identifiers(uuid);
+  refused = false;
+  // Exposed on self so Playwright can check the target before a connection is
+  // even attempted. Without the token.
+  self._cable_url = currentUrl;
   openSocket();
 }
 
 function openSocket() {
-  if (!currentUuid || !currentUrl) return;
+  if (!currentUuid || !currentUrl || refused) return;
 
   let sock;
   try {
-    sock = new WebSocket(currentUrl, [bearerProtocol(currentToken)]);
+    sock = new WebSocket(withToken(currentUrl, currentToken), [CABLE_PROTOCOL]);
   } catch (err) {
-    console.error('realtime connect failed', currentUrl, err);
+    console.error('cable connect failed', redact(currentUrl), err);
     setRealtimeState({ connected: false });
     scheduleReconnect();
     return;
   }
   ws = sock;
-  self._realtime = sock;
+  self._cable = sock;
 
   sock.onmessage = (ev) => {
-    let frame;
-    try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
-    if (!frame?.type) return;
-
-    // Every per-user stream is opened server-side from the token's claims, so
-    // there is nothing to subscribe to and no uuid to send.
-    switch (frame.type) {
+    if (ws !== sock) return;
+    const f = classify(ev.data, ids);
+    switch (f.kind) {
       case 'welcome':
-        setRealtimeState({ connected: true, cable_ready: !!frame.cable_ready });
+        armStale(sock);
+        setRealtimeState({ connected: true, cable_ready: false });
+        // Nothing may be sent before welcome; after it, subscribe. A message
+        // published before the subscription is confirmed is simply not
+        // delivered, which is why a test waits for the light to turn green.
+        sock.send(subscribeCommand(ids.notifications));
+        sock.send(subscribeCommand(ids.state));
+        break;
+      case 'ping':
+        armStale(sock);
+        break;
+      case 'confirm':
+        if (f.identifier === ids.notifications) setRealtimeState({ connected: true, cable_ready: true });
+        break;
+      case 'reject':
+        console.error('cable rejected subscription', f.identifier);
+        if (f.identifier === ids.notifications) setRealtimeState({ connected: true, cable_ready: false });
+        break;
+      case 'disconnect':
+        console.warn('cable disconnected by server:', f.reason);
+        // reconnect:false is the server refusing this token (expired, or from
+        // another deployment). Retrying would only be refused again.
+        if (!f.reconnect) refused = true;
         break;
       case 'notification':
-        handleNotification(frame.message);
+        handleNotification(f.message);
         break;
-      case 'user.state':
-        // Live agent state; the BFF already folded the deltas into `view`.
-        broadcast({ event: 'state', op: frame.message });
+      case 'state':
+        // Live agent state from the node.
+        broadcast({ event: 'state', op: f.message });
+        break;
+      default:
         break;
     }
   };
 
   sock.onclose = () => {
-    if (ws === sock) { ws = null; setRealtimeState({ connected: false }); scheduleReconnect(); }
+    if (ws !== sock) return;
+    ws = null;
+    self._cable = null;
+    clearTimeout(staleTimer);
+    setRealtimeState({ connected: false });
+    scheduleReconnect();
   };
-  sock.onerror = (err) => console.error('realtime socket error', err);
+  sock.onerror = () => console.error('cable socket error', redact(currentUrl));
+}
+
+// A socket that stops hearing pings is dead even if nobody told it (a laptop
+// that slept, a proxy that dropped it). Close it so onclose reconnects.
+function armStale(sock) {
+  clearTimeout(staleTimer);
+  staleTimer = setTimeout(() => { if (ws === sock) { try { sock.close(); } catch { /* gone */ } } }, STALE_AFTER_MS);
 }
 
 // MV3 kills an idle service worker in ~30s. Incoming socket traffic resets that
-// timer (Chrome 116+), and the realtime server pings on its own schedule, so the
-// connection is what keeps the worker alive.
+// timer (Chrome 116+), and cable pings every 3s, so the connection is what
+// keeps the worker alive.
 function scheduleReconnect() {
-  if (!currentUuid || reconnectTimer) return;
+  if (!currentUuid || reconnectTimer || refused) return;
   reconnectTimer = setTimeout(() => { reconnectTimer = null; openSocket(); }, 3000);
 }
 
@@ -169,10 +199,12 @@ function disconnect() {
   lastCall = null;
   currentUuid = '';
   currentToken = '';
+  ids = null;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  clearTimeout(staleTimer);
   const sock = ws;
   ws = null;
-  self._realtime = null;
+  self._cable = null;
   if (sock) { try { sock.close(); } catch { /* already closed */ } }
   setRealtimeState({ connected: false });
 }
@@ -184,8 +216,7 @@ function handleNotification(data) {
   else if (route.kind === 'other') broadcast({ event: 'notification', data });
 }
 
-// The screen pop. A new tab every time; the id of the last one is kept, as the
-// Angular worker did.
+// The screen pop: a new tab every time, as the Angular worker did.
 function openTab(url) {
-  chrome.tabs.create({ url }, (tab) => { popTabId = tab?.id || popTabId; });
+  chrome.tabs.create({ url });
 }

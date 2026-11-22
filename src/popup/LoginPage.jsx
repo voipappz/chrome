@@ -6,7 +6,7 @@ import {
 import PersonOutline from '@mui/icons-material/PersonOutline';
 import LockOutlined from '@mui/icons-material/LockOutlined';
 import { login } from '../api.js';
-import { endpoint, rememberCredentials, rememberedCredentials, rememberSession } from '../session.js';
+import { endpoint, rememberCredentials, rememberedCredentials, rememberSession, cableEndpoint } from '../session.js';
 import { buildStamp, buildStampDetail } from '../buildStamp.js';
 import { tellWorker } from './useWorker.js';
 
@@ -34,7 +34,7 @@ export default function LoginPage() {
       rememberSession(domain, { token: data.token, userUuid: data.user.uuid });
       // The worker has no storage of its own and cannot read this page's, so
       // it is handed the session to open the socket with.
-      tellWorker({ event: 'login', data: { ...data, user_uuid: data.user.uuid }, domain });
+      tellWorker({ event: 'login', data: { ...data, user_uuid: data.user.uuid }, domain, cable: cableEndpoint() });
       navigate('/main', { state: { user: data.user } });
     } catch (err) {
       setError(err.message || 'Login failed');

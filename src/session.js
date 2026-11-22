@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { cableUrl } from './cable.js';
 
 /**
  * The stored session, and the one rule that keeps it honest: a token belongs to
@@ -20,6 +21,7 @@ import { CONFIG } from './config.js';
  * runtime override the e2e specs seed to aim at a fake node.
  */
 const DOMAIN = '_domain';
+const CABLE = '_cable';
 const SOURCE = '_domain_source';
 const TOKEN = '_token';
 const ID = '_id';
@@ -43,6 +45,11 @@ export function endpoint() {
   const raw = (localStorage.getItem(DOMAIN) || CONFIG.API_ENDPOINT || '').trim();
   const d = raw.replace(/\/+$/, '');
   return /^https?:\/\//.test(d) ? d : `https://${d}`;
+}
+
+/** Where the realtime socket goes: `_cable`, else CONFIG.CABLE_URL, else `<endpoint>/cable`. */
+export function cableEndpoint() {
+  return cableUrl(endpoint(), localStorage.getItem(CABLE) || CONFIG.CABLE_URL);
 }
 
 /** Called on a successful login: stores the session and the endpoint it belongs to. */

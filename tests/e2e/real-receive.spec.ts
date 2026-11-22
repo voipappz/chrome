@@ -13,7 +13,7 @@ const READY_FILE = process.env.SCREEN_POP_READY_FILE ?? '';
  * The screen pop, end to end, against a REAL stack — no mocks anywhere.
  *
  *   voipappz-api ──NATS instruction load──> Elixir
- *   va-crystal ──Cable CallEvents─────────> Elixir /ws/events
+ *   va-crystal ──Cable CallEvents─────────> Elixir /cable
  *                                           └─> this extension ──> a tab opens
  *
  * Ruby owns the loaded instruction; Elixir matches and executes it against the
@@ -21,7 +21,7 @@ const READY_FILE = process.env.SCREEN_POP_READY_FILE ?? '';
  * asserts the whole chain without making TypeScript inspect Cable itself.
  *
  * Gated on TEST_RECEIVE=1 and coordinated through SCREEN_POP_READY_FILE. This
- * file owns only the browser side: it logs in, waits for `/ws/events`, writes
+ * file owns only the browser side: it logs in, waits for `/cable`, writes
  * the verified user UUID to a private coordination file, and observes the tab.
  * A platform-side driver must load the Ruby instruction and publish the
  * enriched CallEvents message after that file appears.
@@ -60,13 +60,13 @@ test('an incoming call opens the agent tab in the extension', async () => {
     // The socket must be OPEN before publishing: the relay does not replay, so
     // anything sent before the subscription lands is simply not delivered.
     const live = await sw.evaluate(() => new Promise<boolean>((resolve) => {
-      const ok = () => { const s = (self as any)._realtime; return !!s && s.readyState === 1; };
+      const ok = () => { const s = (self as any)._cable; return !!s && s.readyState === 1; };
       if (ok()) return resolve(true);
       const i = setInterval(() => { if (ok()) { clearInterval(i); resolve(true); } }, 300);
       setTimeout(() => { clearInterval(i); resolve(false); }, 20_000);
     }));
     console.log('  realtime socket open:', live);
-    expect(live, 'worker never opened /ws/events').toBe(true);
+    expect(live, 'worker never opened /cable').toBe(true);
 
     // Arm the browser assertion before telling the shell driver which user is
     // ready. The driver publishes the enriched event through CallEvents;

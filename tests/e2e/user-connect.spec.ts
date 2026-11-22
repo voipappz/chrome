@@ -82,10 +82,10 @@ test.describe('User connect', () => {
    * config.ts still ships a hardcoded API_ENDPOINT (900.nimbusip.com) as the
    * background worker's fallback, so an extension that ignored the typed domain
    * would still log in — against someone else's node — and only reveal it by
-   * subscribing to the wrong server. `_realtime_url` is set before connect() is
+   * subscribing to the wrong server. `_cable_url` is set before connect() is
    * awaited, so this holds whether or not /cable is routed on this node yet.
    */
-  test('the background worker targets <ws|wss>://<typed domain>/ws/events', async ({ context, popupPage }) => {
+  test('the background worker targets <ws|wss>://<typed domain>/cable', async ({ context, popupPage }) => {
     await popupPage.evaluate((d) => localStorage.setItem('_domain', d), DOMAIN);
     await popupPage.locator('input[name="username"]').fill(USERNAME);
     await popupPage.locator('input[name="password"]').fill(PASSWORD);
@@ -95,21 +95,21 @@ test.describe('User connect', () => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    const realtimeUrl: string | null = await sw.evaluate(() =>
+    const cableUrl: string | null = await sw.evaluate(() =>
       new Promise(resolve => {
-        const read = () => (self as any)._realtime_url as string | undefined;
+        const read = () => (self as any)._cable_url as string | undefined;
         if (read()) { resolve(read()!); return; }
         const id = setInterval(() => { const v = read(); if (v) { clearInterval(id); resolve(v); } }, 200);
         setTimeout(() => { clearInterval(id); resolve(null); }, 10_000);
       })
     );
 
-    expect(realtimeUrl, 'background worker never reached the realtime connect step').not.toBeNull();
+    expect(cableUrl, 'background worker never reached the realtime connect step').not.toBeNull();
     // http -> ws, https -> wss: the worker follows the typed domain's scheme
     // (47ba1e0). Rewriting both to wss asserts the behaviour that change removed.
     const expected = normalize(DOMAIN)
       .replace(/^http:\/\//, 'ws://')
       .replace(/^https:\/\//, 'wss://');
-    expect(realtimeUrl).toBe(`${expected}/ws/events`);
+    expect(cableUrl).toBe(`${expected}/cable`);
   });
 });

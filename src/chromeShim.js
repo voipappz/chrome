@@ -1,4 +1,4 @@
-import { bearerProtocol, realtimeUrl } from './realtime.js';
+import { CABLE_PROTOCOL, cableUrl, classify, identifiers, subscribeCommand, withToken } from './cable.js';
 
 /**
  * Lets the popup run as an ordinary web page (`make extension-dev`, then open
@@ -12,9 +12,9 @@ import { bearerProtocol, realtimeUrl } from './realtime.js';
  *
  * WHAT IS FAITHFUL AND WHAT IS NOT:
  *   tabs.create      window.open.
- *   runtime.connect  a port that opens the REAL /ws/events socket, so this mode
- *                    exercises the same realtime hop as the worker, and pushes
- *                    {event:"realtime"} on the welcome frame so the light works.
+ *   runtime.connect  a port that opens the REAL cable socket and subscribes to
+ *                    Notifications, as the worker does, and pushes
+ *                    {event:"realtime"} so the light works.
  *                    Frames go to the console. Screen pops do NOT open tabs
  *                    here: that is the worker's job, and it does not run.
  */
@@ -50,23 +50,23 @@ function fakePort() {
       const token = msg?.data?.token || localStorage.getItem('_token') || '';
       const domain = msg?.domain || localStorage.getItem('_domain') || '';
       if (!token || !domain) {
-        console.warn('[chrome-shim] no session yet, sign in to open /ws/events');
+        console.warn('[chrome-shim] no session yet, sign in to open the cable');
         return;
       }
 
       close();
-      const url = realtimeUrl(domain);
-      console.log('[chrome-shim] realtime →', url);
-      socket = new WebSocket(url, [bearerProtocol(token)]);
+      const url = msg?.cable || cableUrl(domain);
+      const ids = identifiers(msg?.data?.user_uuid || localStorage.getItem('_id') || '');
+      console.log('[chrome-shim] cable →', url);
+      socket = new WebSocket(withToken(url, token), [CABLE_PROTOCOL]);
       socket.onmessage = (ev) => {
-        console.log('[chrome-shim] frame', ev.data);
-        try {
-          const frame = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
-          if (frame?.type === 'welcome') setState(true, !!frame.cable_ready);
-        } catch { /* not a frame we judge on */ }
+        const f = classify(ev.data, ids);
+        if (f.kind === 'welcome') { setState(true, false); socket.send(subscribeCommand(ids.notifications)); }
+        else if (f.kind === 'confirm' && f.identifier === ids.notifications) setState(true, true);
+        else if (f.kind !== 'ping') console.log('[chrome-shim] frame', ev.data);
       };
       socket.onclose = (ev) => {
-        console.log('[chrome-shim] realtime closed', ev.code);
+        console.log('[chrome-shim] cable closed', ev.code);
         setState(false);
       };
     },

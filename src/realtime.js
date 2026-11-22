@@ -1,31 +1,8 @@
 /**
- * The pure half of the realtime client: where the socket goes, how it
- * authenticates, and what each notification means. No sockets and no chrome.*
- * here, so all of it is unit-tested (realtime.test.js); background.js does the
- * I/O. The wire contract is extension/REALTIME_CONTRACT.md.
+ * What each notification means: open a tab, update the call, or pass it on.
+ * Pure, unit-tested in realtime.test.js. The payload is the Notifications
+ * channel's `message`, unchanged from the Angular build.
  */
-
-// The token travels as a SUBPROTOCOL, not a query parameter: browsers cannot
-// set Authorization on a WebSocket handshake, and a URL is recorded by every
-// reverse proxy and access log in between.
-export const BEARER_PREFIX = 'voipappz-bearer.';
-
-/** base64url, unpadded: the server maps -/_ back and re-pads, so + / = must not appear. */
-export function bearerProtocol(token) {
-  const encoded = btoa(token || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return BEARER_PREFIX + encoded;
-}
-
-/**
- * The portal's /ws/events, with the scheme FOLLOWING the domain's: https ->
- * wss, http -> ws. Forcing wss at a plaintext server is a TLS handshake against
- * a port that speaks none, which surfaces as a socket that never opens.
- */
-export function realtimeUrl(domain) {
-  const d = (domain || '').replace(/\/+$/, '');
-  const ws = d.startsWith('http://') ? d.replace(/^http:\/\//, 'ws://') : d.replace(/^https?:\/\//, 'wss://');
-  return `${ws}/ws/events`;
-}
 
 const CALL_EVENTS = { ringing: 'call:ringing', answer: 'call:answer', hangup: 'call:hangup' };
 

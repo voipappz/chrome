@@ -120,34 +120,34 @@ test.describe('Main page (post-login)', () => {
 // ─── Cable WebSocket ──────────────────────────────────────────────────────────
 
 test.describe('Realtime', () => {
-  test('targets <ws|wss>://<domain>/ws/events after login', async ({ context, popupPage }) => {
+  test('targets <ws|wss>://<domain>/cable after login', async ({ context, popupPage }) => {
     test.skip(!DOMAIN || !USERNAME || !PASSWORD, NEED_CREDS);
 
     await loginWith(popupPage, DOMAIN, USERNAME, PASSWORD);
 
     // The background service worker connects asynchronously.
-    // Poll self._realtime_url (set in backgroundPage.ts) via sw.evaluate().
+    // Poll self._cable_url (set in src/background.js) via sw.evaluate().
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    const realtimeUrl: string | null = await sw.evaluate(() =>
+    const cableUrl: string | null = await sw.evaluate(() =>
       new Promise(resolve => {
-        const check = () => (self as any)._realtime_url as string | undefined;
+        const check = () => (self as any)._cable_url as string | undefined;
         if (check()) { resolve(check()!); return; }
         const id = setInterval(() => { const v = check(); if (v) { clearInterval(id); resolve(v); } }, 200);
         setTimeout(() => { clearInterval(id); resolve(null); }, 10_000);
       })
     );
 
-    expect(realtimeUrl).not.toBeNull();
+    expect(cableUrl).not.toBeNull();
     // The scheme FOLLOWS the domain's — https -> wss, http -> ws (47ba1e0).
     // Asserting wss unconditionally passed only because every domain used to
     // be https; against a plaintext portal it fails on correct behaviour, and
     // forcing wss at a server that speaks no TLS is a handshake that never
     // completes rather than an error worth reading.
     const scheme = DOMAIN.startsWith('http://') ? 'ws://' : 'wss://';
-    expect(realtimeUrl!.startsWith(scheme), `expected ${scheme} for ${DOMAIN}`).toBe(true);
-    expect(realtimeUrl).toContain('/ws/events');
+    expect(cableUrl!.startsWith(scheme), `expected ${scheme} for ${DOMAIN}`).toBe(true);
+    expect(cableUrl).toContain('/cable');
   });
 
   test('WebSocket connection becomes active', async ({ context, popupPage }) => {
@@ -158,12 +158,12 @@ test.describe('Realtime', () => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
 
-    // self._realtime is the WebSocket itself; OPEN (readyState 1) is the only
+    // self._cable is the WebSocket itself; OPEN (readyState 1) is the only
     // state in which the subscriptions could have been confirmed.
     const isActive: boolean = await sw.evaluate(() =>
       new Promise(resolve => {
         const check = () => {
-          const sock = (self as any)._realtime;
+          const sock = (self as any)._cable;
           return !!sock && sock.readyState === 1;
         };
         if (check()) { resolve(true); return; }

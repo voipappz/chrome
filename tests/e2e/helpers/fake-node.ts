@@ -9,9 +9,9 @@ import { WebSocketServer } from 'ws';
  * A MIMICKED VoIPAppz node: one HTTPS server that plays both halves the
  * extension talks to —
  *
- *   POST /auth/user_login   -> a canned {token, user:{uuid}} session
- *   GET  /ws/events (websocket) -> the BFF's browser endpoint: welcome, then
- *                              {type:"notification"|"user.state"} frames
+ *   POST /auth/user_login   -> a canned {token, user:{uuid}} session (the API)
+ *   GET  /cable (websocket) -> the node's ActionCable: welcome, confirms the
+ *                              subscriptions, then Notifications messages
  *                              pushed by the test
  *
  * Exists so the receive path — subject naming, payload decoding, the
@@ -23,10 +23,13 @@ import { WebSocketServer } from 'ws';
 export interface FakeNode {
   origin: string;
   userUuid: string;
-  // the bearer subprotocol the client offered, so a test can assert the token
-  // travelled out of band rather than in the URL
+  // what the client offered and sent, so a test can assert the handshake
   offeredProtocols: string[];
-  publish(frame: Record<string, unknown>): boolean;
+  tokens: string[];
+  subscriptions: string[];
+  // pushes `message` on every Notifications subscription, under the identifier
+  // the client subscribed with (the server echoes it verbatim)
+  publish(message: Record<string, unknown>): boolean;
   close(): Promise<void>;
 }
 
@@ -65,23 +68,39 @@ export async function startFakeNode(): Promise<FakeNode> {
   );
 
   const offeredProtocols: string[] = [];
+  const tokens: string[] = [];
+  const subscriptions: string[] = [];
   const sockets = new Set<any>();
-  const wss = new WebSocketServer({ server, path: '/ws/events' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/cable',
+    // The node speaks only actioncable-v1-json, and so does this.
+    handleProtocols: (protocols: Set<string>) => (protocols.has('actioncable-v1-json') ? 'actioncable-v1-json' : false),
+  });
 
   wss.on('connection', (ws: any, req: any) => {
-    // The token rides a subprotocol, never the URL. Reject without one, so a
-    // client that regressed to a query parameter fails here rather than in
-    // production with the credential in an access log.
     const offered = String(req.headers['sec-websocket-protocol'] || '')
       .split(',').map((v: string) => v.trim()).filter(Boolean);
     offeredProtocols.push(...offered);
-    if (!offered.some((v: string) => v.startsWith('voipappz-bearer.'))) { ws.close(); return; }
+    const token = new URL(req.url, 'https://x').searchParams.get('token') || '';
+    tokens.push(token);
+    // As the node does: no subprotocol or no token, and the socket is refused.
+    if (!offered.includes('actioncable-v1-json') || !token) {
+      ws.send(JSON.stringify({ type: 'disconnect', reason: 'unauthorized', reconnect: false }));
+      ws.close();
+      return;
+    }
 
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    // Per-user streams are opened server-side from the token's claims, so the
-    // client subscribes to nothing — welcome is the whole handshake.
-    ws.send(JSON.stringify({ type: 'welcome', ts: new Date().toISOString(), subscribed: [], clients: sockets.size, cable_ready: true }));
+    ws.on('message', (raw: Buffer) => {
+      let cmd: any;
+      try { cmd = JSON.parse(raw.toString()); } catch { return; }
+      if (cmd?.command !== 'subscribe') return;
+      subscriptions.push(cmd.identifier);
+      ws.send(JSON.stringify({ type: 'confirm_subscription', identifier: cmd.identifier }));
+    });
+    ws.send(JSON.stringify({ type: 'welcome' }));
   });
 
   await new Promise<void>((r) => server.listen(0, r)); // all interfaces: Chrome may resolve localhost to ::1
@@ -91,10 +110,12 @@ export async function startFakeNode(): Promise<FakeNode> {
     origin: `https://localhost:${port}`,
     userUuid,
     offeredProtocols,
-    publish(frame) {
+    tokens,
+    subscriptions,
+    publish(message) {
       if (!sockets.size) return false;
-      const body = JSON.stringify(frame);
-      for (const ws of sockets) ws.send(body);
+      const ids = subscriptions.filter((i) => { try { return JSON.parse(i).channel === 'Notifications'; } catch { return false; } });
+      for (const ws of sockets) for (const identifier of new Set(ids)) ws.send(JSON.stringify({ identifier, message }));
       return true;
     },
     close: () =>
