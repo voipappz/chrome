@@ -1,6 +1,7 @@
 import { CONFIG } from './config.js';
 import { CABLE_PROTOCOL, STALE_AFTER_MS, cableUrl, classify, identifiers, redact, subscribeCommand, withToken } from './cable.js';
 import { callFrame, routeNotification } from './realtime.js';
+import { clearSession, loadSession, saveSession } from './sessionStore.js';
 
 // The service worker: holds the cable socket, opens screen-pop tabs, and tells
 // the popup what it knows. The behaviour is the Angular build's
@@ -15,6 +16,15 @@ let ids = null;
 let reconnectTimer = null;
 let staleTimer = null;
 let refused = false; // the server said reconnect:false (token refused): stop retrying
+let welcomeTimer = null;
+
+// A socket that has not been welcomed this long after it was opened is closed
+// and retried: a handshake stuck on a proxy, or a server that accepts and says
+// nothing, would otherwise hold the worker on a dead socket forever.
+const WELCOME_DEADLINE_MS = 10000;
+// Wakes the worker if Chrome stopped it with nothing else to wake it.
+const KEEPALIVE_ALARM = 'cable-keepalive';
+const store = chrome.storage?.local;
 
 // ── the realtime light ───────────────────────────────────────────────────────
 //
@@ -82,6 +92,23 @@ chrome.action?.setTitle({ title: CONFIG.PAGE_TITLE });
 // A restarted worker has no socket yet, whatever the last run did.
 setRealtimeState({ connected: false });
 
+// RESTART RECOVERY. The worker reconnects from its own stored session
+// (sessionStore.js) whenever it starts -- browser start, extension update or
+// reload, a worker Chrome stopped and woke again -- and on a one-minute alarm,
+// so screen pops resume without anyone opening the popup.
+chrome.runtime.onStartup?.addListener(restore);
+chrome.runtime.onInstalled?.addListener(restore);
+chrome.alarms?.onAlarm.addListener((alarm) => { if (alarm.name === KEEPALIVE_ALARM) restore(); });
+restore();
+
+async function restore() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (currentUuid) { openSocket(); return; }
+  let s = null;
+  try { s = await loadSession(store); } catch (err) { console.error('reading the stored session', err); }
+  if (s && !currentUuid) login({ data: { user_uuid: s.user_uuid, token: s.token }, cable: s.cable });
+}
+
 function onConnect(port) {
   ports.add(port);
   port.onDisconnect.addListener(() => ports.delete(port));
@@ -91,7 +118,7 @@ function onConnect(port) {
   port.onMessage.addListener((msg) => {
     if (!msg) return;
     if (msg.event === 'status') sendState(port);
-    else if (msg.event === 'logout') disconnect();
+    else if (msg.event === 'logout') logout();
     else if (msg.event === 'login' && msg.data?.user_uuid) login(msg);
   });
 }
@@ -99,7 +126,8 @@ function onConnect(port) {
 function login(msg) {
   const uuid = msg.data.user_uuid;
   const token = msg.data.token || '';
-  if (ws && ws.readyState === WebSocket.OPEN && currentUuid === uuid && currentToken === token) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+      && currentUuid === uuid && currentToken === token) return;
   disconnect();
 
   currentUrl = msg.cable || cableUrl(msg.domain || CONFIG.API_ENDPOINT, CONFIG.CABLE_URL);
@@ -110,7 +138,17 @@ function login(msg) {
   // Exposed on self so Playwright can check the target before a connection is
   // even attempted. Without the token.
   self._cable_url = currentUrl;
+  saveSession(store, { user_uuid: uuid, token, cable: currentUrl }).catch((err) => console.error('storing the session', err));
+  chrome.alarms?.create(KEEPALIVE_ALARM, { periodInMinutes: 1 });
   openSocket();
+}
+
+// The agent signed out: forget the stored session too, or the next restart
+// would sign them back in.
+function logout() {
+  disconnect();
+  clearSession(store).catch(() => {});
+  chrome.alarms?.clear(KEEPALIVE_ALARM);
 }
 
 function openSocket() {
@@ -127,12 +165,17 @@ function openSocket() {
   }
   ws = sock;
   self._cable = sock;
+  clearTimeout(welcomeTimer);
+  welcomeTimer = setTimeout(() => {
+    if (ws === sock) { console.warn('cable: no welcome in', WELCOME_DEADLINE_MS, 'ms, retrying'); try { sock.close(); } catch { /* gone */ } }
+  }, WELCOME_DEADLINE_MS);
 
   sock.onmessage = (ev) => {
     if (ws !== sock) return;
     const f = classify(ev.data, ids);
     switch (f.kind) {
       case 'welcome':
+        clearTimeout(welcomeTimer);
         armStale(sock);
         setRealtimeState({ connected: true, cable_ready: false });
         // Nothing may be sent before welcome; after it, subscribe. A message
@@ -155,7 +198,11 @@ function openSocket() {
         console.warn('cable disconnected by server:', f.reason);
         // reconnect:false is the server refusing this token (expired, or from
         // another deployment). Retrying would only be refused again.
-        if (!f.reconnect) refused = true;
+        if (!f.reconnect) {
+          refused = true;
+          clearSession(store).catch(() => {});
+          chrome.alarms?.clear(KEEPALIVE_ALARM);
+        }
         break;
       case 'notification':
         handleNotification(f.message);
@@ -174,6 +221,7 @@ function openSocket() {
     ws = null;
     self._cable = null;
     clearTimeout(staleTimer);
+    clearTimeout(welcomeTimer);
     setRealtimeState({ connected: false });
     scheduleReconnect();
   };
@@ -202,6 +250,7 @@ function disconnect() {
   ids = null;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   clearTimeout(staleTimer);
+  clearTimeout(welcomeTimer);
   const sock = ws;
   ws = null;
   self._cable = null;

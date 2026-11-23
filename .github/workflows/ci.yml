@@ -48,8 +48,13 @@ jobs:
 
       # Extensions only load in Chrome's "new" headless mode, which the specs
       # select themselves (--headless=new); no display server is needed.
-      - name: End-to-end (offline, fake node)
-        run: npm run test:e2e -- mock-realtime
+      - name: End-to-end (offline, fake node; includes a real browser restart)
+        run: npm run test:e2e -- mock-
+
+      # The real switch: the cable this build connects to answers ActionCable.
+      # No credential; a socket opened as nobody gets "unauthorized" back.
+      - name: Live — wss://switch.voipappz.io/cable answers ActionCable
+        run: node scripts/check-live-cable.mjs
 
       - uses: actions/upload-artifact@v4
         if: always()
