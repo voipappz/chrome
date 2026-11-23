@@ -65,6 +65,15 @@ jobs:
         run: npx playwright test mock-
       - name: Live — wss://switch.voipappz.io/cable answers ActionCable
         run: node scripts/check-live-cable.mjs
+      # The release build, signing in as a real agent: no release that cannot
+      # log in. Required here: a release without the secrets fails.
+      - name: Live — a real agent signs in with the release build
+        env:
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        run: |
+          [ -n "$TEST_USERNAME" ] && [ -n "$TEST_PASSWORD" ] || { echo "::error::TEST_USERNAME / TEST_PASSWORD secrets are required for a release"; exit 1; }
+          npx playwright test live-switch
 
       - name: Zip
         run: cd dist && python3 -m zipfile -c "../${{ steps.v.outputs.zip }}" *
