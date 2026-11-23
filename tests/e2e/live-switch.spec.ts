@@ -3,6 +3,7 @@ import { chromium, type BrowserContext } from '@playwright/test';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { execFileSync } from 'child_process';
 
 /**
  * THE REAL SWITCH, the way an agent uses it: the built extension in a real
@@ -17,6 +18,7 @@ import * as fs from 'fs';
 const EXT = path.resolve(import.meta.dirname, '../../dist');
 const USER = process.env.TEST_USERNAME ?? '';
 const PASS = process.env.TEST_PASSWORD ?? '';
+const NATS = !!(process.env.NATS_TOKEN || process.env.NATS_USER);
 
 test.describe('Live: the real switch', () => {
   test.skip(!USER || !PASS, 'set TEST_USERNAME and TEST_PASSWORD (an agent login) to run against the real switch');
@@ -55,5 +57,21 @@ test.describe('Live: the real switch', () => {
 
     // The worker went to the build's own cable, not anywhere else.
     expect(await sw.evaluate(() => (self as any)._cable_url)).toBe('wss://switch.voipappz.io/cable');
+  });
+
+  // THE WHOLE PATH: NATS -> the node's cable -> the extension -> a tab. The
+  // screen pop is published exactly as the platform does it (notifications:
+  // <uuid> on wss://switch.voipappz.io/nats), to this test agent only.
+  test('a screen pop published on NATS opens its tab', async () => {
+    test.skip(!NATS, 'set NATS_USER/NATS_PASSWORD or NATS_TOKEN to publish the screen pop through NATS');
+    const popup = ctx.pages().find((p) => p.url().includes('#/main'));
+    const uuid = await popup!.evaluate(() => localStorage.getItem('_id'));
+    expect(uuid, 'the login stored no user uuid').toBeTruthy();
+
+    const url = `https://example.com/?voipappz-screen-pop=${Date.now()}`;
+    const opened = ctx.waitForEvent('page', { predicate: (p) => p.url().includes('voipappz-screen-pop'), timeout: 20_000 });
+    execFileSync('node', [path.resolve(import.meta.dirname, '../../scripts/screen-pop.mjs'), uuid!, url], { stdio: 'inherit' });
+    const tab = await opened;
+    expect(tab.url()).toBe(url);
   });
 });

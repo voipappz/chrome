@@ -7,7 +7,7 @@ NPM  = $(MISE) npm
 SPEC ?= mock-
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev build test lint unit e2e live pack release clean
+.PHONY: help setup dev build test lint unit e2e live screen-pop pack release clean
 
 help: ## Show this help
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z0-9-]+:.*## / { printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -43,6 +43,11 @@ e2e: build ## [SPEC=mock-] Playwright specs in a real Chrome (default: the offli
 # ActionCable? No credential, changes nothing (scripts/check-live-cable.mjs).
 live: ## The build's cable (wss://switch.voipappz.io/cable) answers ActionCable
 	$(NPM) exec -- node scripts/check-live-cable.mjs
+
+# One screen pop through NATS, as the platform sends it (scripts/screen-pop.mjs).
+screen-pop: ## [USER_UUID=x URL=x] Publish tab:new on notifications:<uuid> via wss://switch.voipappz.io/nats (NATS_USER/NATS_PASSWORD or NATS_TOKEN)
+	@test -n "$(USER_UUID)" || { echo "usage: make screen-pop USER_UUID=<agent uuid> [URL=https://...]  (NATS_USER/NATS_PASSWORD or NATS_TOKEN in the env)"; exit 1; }
+	$(NPM) exec -- node scripts/screen-pop.mjs "$(USER_UUID)" $(URL)
 
 # A release is a tag: .github/workflows/release.yml builds, tests and
 # publishes it as a GitHub Release with the zip attached (not the Web Store).
