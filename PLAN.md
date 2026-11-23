@@ -53,8 +53,10 @@ Not in scope: publishing to the Chrome Web Store (decided: do not publish).
 
 ## Follow-ups (each its own PR, after the above)
 
-- **Restart recovery (the most important one):** screen pops stop whenever Chrome stops the worker, until the popup opens; inherited from Angular. The popup writes `{token, user_uuid, domain, cable}` to `chrome.storage.local` (`.session` does not survive a browser restart, and the popup already keeps the token in localStorage, so this adds no new exposure). The worker restores it on start and on `runtime.onStartup`. Keep the `storage` permission and set `minimum_chrome_version: "116"` (socket traffic keeps the worker alive only from 116). Add an e2e test with the popup closed.
-- **Connect and welcome deadline:** a socket stuck connecting, or open with no `welcome` within 10s, is closed and retried. Today the stale watchdog starts only at the first welcome or ping.
+- [x] **Restart recovery:** done. The worker stores `{user_uuid, token, cable}` in `chrome.storage.local` (`src/sessionStore.js`) and reconnects by itself on start, `runtime.onStartup`, `onInstalled` and a 1-minute `chrome.alarms` wake; logout and a refused token clear it. `minimum_chrome_version: "116"`, `alarms` permission. e2e `mock-restart.spec.ts` really restarts the browser with the popup never opened and requires the tab to open; a logout survives a restart.
+- [x] **Connect and welcome deadline:** done. A socket with no `welcome` 10s after opening is closed and retried.
+- [x] **Releases:** done. `make release VERSION=x` tags `vx`; `.github/workflows/release.yml` lints, unit-tests, builds with that version, runs the offline e2e and the live cable check on the release build, and publishes a GitHub Release with `voipappz-extension-<version>.zip` (not the Web Store).
+- [x] **Live check:** `make live` / CI: `wss://switch.voipappz.io/cable` answers ActionCable (no credential).
 - **OTP in login:** `/auth/user_login` can return `{otp_sent, temp_token}` instead of `{user, token}`. Then ask for the code and call `/auth/user/otp/verify` with `temp_token` and `code`, retrying on a wrong or expired code. The Angular build never handled this. Open question: is OTP on for agent users?
 - **wss only** outside local tests: refuse a `ws://` cable URL in a packed build, since the token is in its query.
 - **Per-customer builds from env:** `API_URL`, `CABLE_URL` and `CUSTOMER` at build time, instead of edits to `config.js`.

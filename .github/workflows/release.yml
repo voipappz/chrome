@@ -1,0 +1,82 @@
+# A release: push a tag vX.Y.Z (`make release VERSION=X.Y.Z`) and this builds,
+# tests and publishes it as a GitHub Release with the extension zip attached.
+# NOT the Chrome Web Store. The tag is the version: it is stamped into the
+# manifest (EXT_VERSION, manifest.config.js) and the zip's name, so what is
+# installed says which release it is.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from the tag
+        id: v
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Chrome refuses anything but 1-4 dot-separated integers, 0-65535.
+          echo "$version" | grep -Eq '^[0-9]{1,5}(\.[0-9]{1,5}){0,3}$' \
+            || { echo "::error::tag $GITHUB_REF_NAME is not v<chrome version> (e.g. v0.0.11)"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "zip=voipappz-extension-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - uses: jdx/mise-action@v2
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run test:unit
+
+      - name: Build ${{ steps.v.outputs.version }}
+        env:
+          EXT_VERSION: ${{ steps.v.outputs.version }}
+        run: npm run build
+
+      - name: The build is the version
+        run: |
+          got=$(node -p "require('./dist/manifest.json').version")
+          [ "$got" = "${{ steps.v.outputs.version }}" ] || { echo "::error::manifest says $got"; exit 1; }
+          node -p "const m=require('./dist/manifest.json'); m.name + ' ' + m.version"
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      # The release build itself, not a rebuild: the specs load dist/.
+      - name: End-to-end on the release build (offline, fake node)
+        run: npx playwright test mock-
+      - name: Live — wss://switch.voipappz.io/cable answers ActionCable
+        run: node scripts/check-live-cable.mjs
+
+      - name: Zip
+        run: cd dist && python3 -m zipfile -c "../${{ steps.v.outputs.zip }}" *
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name=$(node -p "require('./dist/manifest.json').name")
+          gh release create "$GITHUB_REF_NAME" "${{ steps.v.outputs.zip }}" \
+            --title "$name (${{ steps.v.outputs.version }})" \
+            --notes "Install: unzip, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
+          Connects to wss://switch.voipappz.io/cable; logs in at https://switch.voipappz.io.
+          Built and tested by the Release workflow from ${GITHUB_SHA::7}." \
+            --verify-tag

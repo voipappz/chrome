@@ -62,3 +62,7 @@ build, with an Emotion cache that mirrors styles for the Hebrew main page.
 ```
 make e2e SPEC=login TEST_DOMAIN=https://switch.voipappz.io TEST_USERNAME=... TEST_PASSWORD=...
 ```
+
+## Releases
+
+`make release VERSION=0.0.11` tags `v0.0.11` and pushes it. The Release workflow builds that version (it is stamped into the manifest), runs the unit tests, the offline e2e (including a real browser restart) and the live check against `wss://switch.voipappz.io/cable`, then publishes a GitHub Release with `voipappz-extension-0.0.11.zip`. Install: unzip, `chrome://extensions` → Developer mode → Load unpacked. Not published to the Chrome Web Store.

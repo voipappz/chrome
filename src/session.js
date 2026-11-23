@@ -47,9 +47,16 @@ export function endpoint() {
   return /^https?:\/\//.test(d) ? d : `https://${d}`;
 }
 
-/** Where the realtime socket goes: `_cable`, else CONFIG.CABLE_URL, else `<endpoint>/cable`. */
+/**
+ * Where the realtime socket goes: `_cable` if set; else, when `_domain`
+ * overrides the API (the e2e specs, a build aimed elsewhere at runtime), that
+ * host's /cable, so the two always move together; else CONFIG.CABLE_URL.
+ */
 export function cableEndpoint() {
-  return cableUrl(endpoint(), localStorage.getItem(CABLE) || CONFIG.CABLE_URL);
+  const explicit = localStorage.getItem(CABLE);
+  if (explicit) return cableUrl(endpoint(), explicit);
+  if (localStorage.getItem(DOMAIN)) return cableUrl(endpoint());
+  return cableUrl(endpoint(), CONFIG.CABLE_URL);
 }
 
 /** Called on a successful login: stores the session and the endpoint it belongs to. */

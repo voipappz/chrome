@@ -27,7 +27,11 @@ export default defineManifest(() => {
     short_name: 'nimbus',
     version,
     description: 'Screen pops and call state for VoipAppz agents',
-    permissions: ['tabs', 'storage'],
+    // storage: the worker's own copy of the session (sessionStore.js);
+    // alarms: wakes a worker Chrome stopped, so it reconnects (restart recovery).
+    permissions: ['tabs', 'storage', 'alarms'],
+    // 116: from here incoming socket traffic keeps the worker alive.
+    minimum_chrome_version: '116',
     action: { default_popup: 'index.html', default_title: 'Nimbus' },
     background: { service_worker: 'src/background.js', type: 'module' },
     content_scripts: [{ js: ['src/content.js'], matches: ['<all_urls>'] }],

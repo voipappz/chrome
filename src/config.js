@@ -8,7 +8,9 @@ export const CONFIG = {
   // the e2e specs aim the extension at a fake node, and how you point a packed
   // build somewhere else without a rebuild.
   API_ENDPOINT: 'https://switch.voipappz.io',
-  CABLE_URL: '',
+  // Named outright rather than derived, so the build says where it connects:
+  // the switch's cable, which Kong proxies to a live node.
+  CABLE_URL: 'wss://switch.voipappz.io/cable',
   // WHOSE DEPLOYMENT THIS BUILD IS FOR. Every customer gets the same code and
   // different addresses, so a packed .zip is indistinguishable from any other
   // by looking at it. Stamped into the UI beside the version (buildStamp.js)
