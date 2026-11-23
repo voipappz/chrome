@@ -2,6 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { crx } from '@crxjs/vite-plugin'
 import manifest from './manifest.config.js'
+import { customerConfig } from './src/customers.js'
+
+// The customer this build is for (src/customers.js); an unknown one fails the
+// build here rather than shipping an extension with no address.
+const CUSTOMER = customerConfig(process.env.EXT_CUSTOMER).CUSTOMER
 
 // Popup, service worker and content script from manifest.config.js, by CRXJS.
 //
@@ -11,6 +16,7 @@ import manifest from './manifest.config.js'
 const PORT = Number(process.env.PORT || 5175)
 
 export default defineConfig({
+  define: { __EXT_CUSTOMER__: JSON.stringify(CUSTOMER) },
   plugins: [react(), crx({ manifest })],
   build: {
     target: 'es2022',

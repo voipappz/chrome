@@ -68,6 +68,19 @@ jobs:
           NATS_TOKEN: ${{ secrets.NATS_TOKEN }}
         run: npm run test:e2e -- live-switch
 
+      # The nimbus build against nimbus-prod: its cable answers, and a wrong
+      # password gets nimbus's own refusal in the popup (no credential needed);
+      # a real nimbus sign-in runs once NIMBUS_TEST_* secrets exist.
+      - name: Nimbus build — live against nimbus-prod.voipappz.io
+        env:
+          EXT_CUSTOMER: nimbus
+          TEST_USERNAME: ${{ secrets.NIMBUS_TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.NIMBUS_TEST_PASSWORD }}
+        run: |
+          npm run build
+          node scripts/check-live-cable.mjs
+          npx playwright test live-switch
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

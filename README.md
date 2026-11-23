@@ -65,4 +65,8 @@ make e2e SPEC=login TEST_DOMAIN=https://switch.voipappz.io TEST_USERNAME=... TES
 
 ## Releases
 
-`make release VERSION=0.0.11` tags `v0.0.11` and pushes it. The Release workflow builds that version (it is stamped into the manifest), runs the unit tests, the offline e2e (including a real browser restart) and the live check against `wss://switch.voipappz.io/cable`, then publishes a GitHub Release with `voipappz-extension-0.0.11.zip`. Install: unzip, `chrome://extensions` → Developer mode → Load unpacked. Not published to the Chrome Web Store.
+`make release VERSION=0.0.11` tags `v0.0.11` and pushes it. The Release workflow builds that version (it is stamped into the manifest), runs the unit tests, the offline e2e (including a real browser restart) and the live check against `wss://switch.voipappz.io/cable`, then publishes a GitHub Release with one zip per customer (`voipappz-extension-0.0.11.zip`, `nimbus-extension-0.0.11.zip`). Install: unzip, `chrome://extensions` → Developer mode → Load unpacked. Not published to the Chrome Web Store.
+
+## Customers
+
+One build per customer, from `src/customers.js`: `EXT_CUSTOMER=nimbus make build` (default `voipappz`). It sets where the extension logs in, its cable, and its name (`Nimbus14`, `VoipAppz14`). Add a customer there; CI and releases build and check each one against its own server.

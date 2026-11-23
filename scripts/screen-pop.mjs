@@ -7,15 +7,16 @@
 //   NATS_USER=... NATS_PASSWORD=... node scripts/screen-pop.mjs <user_uuid> [url]
 //   NATS_TOKEN=...                  node scripts/screen-pop.mjs <user_uuid> [url]
 //
-// NATS_URL defaults to wss://switch.voipappz.io/nats. An agent's own login
+// NATS_URL defaults to the build customer's wss://<host>/nats (EXT_CUSTOMER). An agent's own login
 // token is NOT a NATS credential (the server answers Authorization Violation):
 // this needs a NATS user allowed to publish on notifications:*. Plain NATS
 // protocol over a WebSocket, so no NATS library is needed.
 import WebSocket from 'ws';
+import { CONFIG } from '../src/config.js';
 
 const [uuid, url = 'https://example.com/?screen-pop-test'] = process.argv.slice(2);
 if (!uuid) { console.error('usage: node scripts/screen-pop.mjs <user_uuid> [url]'); process.exit(2); }
-const server = process.env.NATS_URL || 'wss://switch.voipappz.io/nats';
+const server = process.env.NATS_URL || `wss://${new URL(CONFIG.API_ENDPOINT).host}/nats`;
 const auth = process.env.NATS_TOKEN ? { auth_token: process.env.NATS_TOKEN }
   : process.env.NATS_USER ? { user: process.env.NATS_USER, pass: process.env.NATS_PASSWORD || '' } : {};
 const subject = `notifications:${uuid}`;
