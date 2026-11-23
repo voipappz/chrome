@@ -6,7 +6,7 @@ import {
 import Logout from '@mui/icons-material/Logout';
 import CallEnd from '@mui/icons-material/CallEnd';
 import { getBreakStatuses, getUser, hangUp } from '../api.js';
-import { currentSession, endpoint, forgetSession } from '../session.js';
+import { currentSession, endpoint, forgetSession, cableEndpoint } from '../session.js';
 import { buildStampDetail } from '../buildStamp.js';
 import { CALL_STATUS_LABEL } from '../realtime.js';
 import { secondsToString } from '../timer.js';
@@ -66,7 +66,7 @@ export default function MainPage() {
     // whole session to do that (it has no storage of its own), so the shape
     // matches what login posts.
     const { userUuid, token } = currentSession();
-    if (userUuid && token) post({ event: 'login', data: { user_uuid: userUuid, token }, domain: endpoint() });
+    if (userUuid && token) post({ event: 'login', data: { user_uuid: userUuid, token }, domain: endpoint(), cable: cableEndpoint() });
 
     const load = user ? Promise.resolve(user) : getUser(userUuid).catch((err) => { console.error('loading user', err); return {}; });
     load.then((u) => {

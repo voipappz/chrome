@@ -24,25 +24,29 @@ Node 22 comes from `mise.toml`; every target runs through `mise exec`.
 ## How it works
 
 ```
-popup (index.html)            service worker (background.js)        portal
-  login  ── POST /auth/user_login ─────────────────────────────────▶  /auth/user_login
-  main   ── runtime port {event:"login", token} ─▶ WebSocket ──────▶  /ws/events
-         ◀── {event:"realtime"|"call"} ──────────  ◀── notification ──
+popup (index.html)            service worker (background.js)        server
+  login  ── POST /auth/user_login ─────────────────────────────────▶  API
+  main   ── runtime port {event:"login", token} ─▶ WebSocket ──────▶  node /cable (ActionCable)
+         ◀── {event:"realtime"|"call"} ──────────  ◀── Notifications ──  ◀── NATS
                                                    tab:new → chrome.tabs.create(url)
 ```
 
-- **The popup** signs in and stores the session in its `localStorage`
-  (`_token`, `_id`, `_domain`; see `src/session.js`). Then it hands the session
-  to the worker over a runtime port. The worker has no storage of its own.
-- **The worker** holds one socket to the portal's `/ws/events`. The token goes
-  as a `voipappz-bearer.*` subprotocol, never in the URL. On a `tab:new`
+- **The popup** signs in at the API and stores the session in its
+  `localStorage` (`_token`, `_id`, `_domain`; see `src/session.js`). Then it
+  hands the session to the worker over a runtime port. The worker has no
+  storage of its own.
+- **The worker** holds one ActionCable socket to the node, with the login
+  token, and subscribes to `Notifications` and `StateChannel`. On a `tab:new`
   notification it opens the tab. Call events and the connection state go to
-  any open popup, and nothing is persisted. The wire contract is
-  [REALTIME_CONTRACT.md](REALTIME_CONTRACT.md). The routing of each
-  notification is in `src/realtime.js`, with unit tests.
-- **The host** is `CONFIG.API_ENDPOINT` in `src/config.js`, one per customer
-  build, with `CUSTOMER` beside it. `localStorage._domain` overrides it at
-  runtime, and that override is how the e2e specs aim at a fake node.
+  any open popup, and nothing is persisted. Protocol:
+  [CABLE_CONTRACT.md](CABLE_CONTRACT.md).
+- **Why cable, not NATS directly:** cable admits the socket with the agent's
+  own token and streams only that agent's notifications. NATS checks a fixed
+  username and password, which a Chrome extension cannot keep secret. Cable is
+  NATS-backed, so the events are the same.
+- **The hosts** are `CONFIG.API_ENDPOINT` and `CONFIG.CABLE_URL` (empty means
+  `<API>/cable`) in `src/config.js`. `localStorage._domain` and `_cable`
+  override them at runtime; that is how the e2e specs aim at a fake node.
 
 The popup's theme (`src/popup/theme.js`) keeps the indigo look of the Angular
 build, with an Emotion cache that mirrors styles for the Hebrew main page.
@@ -51,12 +55,10 @@ build, with an Emotion cache that mirrors styles for the Hebrew main page.
 
 | Spec | Needs |
 | --- | --- |
-| `mock-realtime` | Nothing. A fake HTTPS node with `/ws/events`, started by the spec. |
+| `mock-realtime` | Nothing. A fake HTTPS node with `/auth/user_login` and `/cable`, started by the spec. |
 | `login`, `user-connect` | `TEST_DOMAIN`, `TEST_USERNAME`, `TEST_PASSWORD`. The USER login (users table), not the account one. |
-| `portal-login` | A portal on `http://localhost:4001` (or `TEST_DOMAIN`). |
-| `portal-receive` | `CABLE_EVENTS=1` and the cable-events compose stack (`CABLE_EVENTS_COMPOSE` points at it). |
 | `real-receive` | `TEST_RECEIVE=1`, driven by a shell harness. |
 
 ```
-make e2e SPEC=login TEST_DOMAIN=http://localhost:4001 TEST_USERNAME=... TEST_PASSWORD=...
+make e2e SPEC=login TEST_DOMAIN=https://switch.voipappz.io TEST_USERNAME=... TEST_PASSWORD=...
 ```

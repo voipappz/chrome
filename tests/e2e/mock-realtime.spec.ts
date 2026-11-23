@@ -46,11 +46,9 @@ test.describe('Realtime against a mimicked node', () => {
     await page.getByRole('button', { name: /login/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
-    // Live means the socket authenticated and the server welcomed it.
-    await expect
-      .poll(() => node.offeredProtocols.some((p) => p.startsWith('voipappz-bearer.')),
-            { timeout: 20_000 })
-      .toBe(true);
+    // Live means the socket is welcomed and Notifications is confirmed: only
+    // then can a published screen pop arrive. The light says exactly that.
+    await expect(page.getByTestId('conn-dot')).toHaveAttribute('data-state', 'on', { timeout: 20_000 });
   });
 
   test.afterAll(async () => {
@@ -59,26 +57,23 @@ test.describe('Realtime against a mimicked node', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  // The token must travel out of band. A regression to ?token= would still
-  // connect, and would still work — while writing the credential into every
-  // proxy and access log on the way.
-  test('the worker authenticates with a bearer subprotocol, not the URL', () => {
-    const bearer = node.offeredProtocols.find((p) => p.startsWith('voipappz-bearer.'));
-    expect(bearer, 'no voipappz-bearer.* subprotocol was offered').toBeTruthy();
-    expect(bearer!.length).toBeGreaterThan('voipappz-bearer.'.length);
+  // ActionCable as the node speaks it, and as the Angular build's cable client
+  // did: the subprotocol, the login token in ?token=, and Notifications.
+  test('the worker opens cable with the login token and subscribes to Notifications', () => {
+    expect(node.offeredProtocols).toContain('actioncable-v1-json');
+    expect(node.tokens).toContain('ci-fake-token');
+    expect(node.subscriptions.map((i) => JSON.parse(i))).toContainEqual({ channel: 'Notifications', user_uuid: node.userUuid });
   });
 
   test('a tab:new notification opens the tab', async () => {
     const opened = ctx.waitForEvent('page', { timeout: 15_000 });
-    node.publish({ type: 'notification',
-      message: { action: 'tab:new', url: `${node.origin}/popped` } });
+    node.publish({ action: 'tab:new', url: `${node.origin}/popped` });
     const tab = await opened;
     expect(tab.url()).toContain('/popped');
   });
 
   test('a current-shape ringing event reaches the popup as call:ringing', async () => {
-    node.publish({ type: 'notification',
-      message: { type: 'agent', message: { type: 'ringing', call: { uuid: 'ci-call-1' }, screen: { uuid: 'scr-1' } } } });
+    node.publish({ type: 'agent', message: { type: 'ringing', call: { uuid: 'ci-call-1' }, screen: { uuid: 'scr-1' } } });
     const frame = await callFrameFor(page, 'ci-call-1');
     expect(frame, 'the worker pushed no call frame down the port').toBeTruthy();
     expect(frame.status).toBe('call:ringing');

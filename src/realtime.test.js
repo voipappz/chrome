@@ -1,27 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BEARER_PREFIX, bearerProtocol, callFrame, realtimeUrl, routeNotification } from './realtime.js';
-
-describe('realtimeUrl', () => {
-  it('follows the domain scheme: https -> wss, http -> ws', () => {
-    expect(realtimeUrl('https://portal.example')).toBe('wss://portal.example/ws/events');
-    expect(realtimeUrl('http://localhost:4001')).toBe('ws://localhost:4001/ws/events');
-  });
-
-  it('drops trailing slashes', () => {
-    expect(realtimeUrl('https://portal.example///')).toBe('wss://portal.example/ws/events');
-  });
-});
-
-describe('bearerProtocol', () => {
-  it('is base64url and unpadded, so the server can decode it', () => {
-    // "??>" encodes to "Pz8+" in plain base64: both + and / cases, plus padding below
-    const p = bearerProtocol('a?>~');
-    expect(p.startsWith(BEARER_PREFIX)).toBe(true);
-    expect(p.slice(BEARER_PREFIX.length)).not.toMatch(/[+/=]/);
-    const back = atob(p.slice(BEARER_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/').padEnd(8, '='));
-    expect(back).toBe('a?>~');
-  });
-});
+import { callFrame, routeNotification } from './realtime.js';
 
 describe('routeNotification', () => {
   it('opens a tab for the legacy tab:new', () => {
