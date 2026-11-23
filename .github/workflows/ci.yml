@@ -62,6 +62,10 @@ jobs:
         env:
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          # Optional: with these, the screen pop goes through NATS and the tab must open.
+          NATS_USER: ${{ secrets.NATS_USER }}
+          NATS_PASSWORD: ${{ secrets.NATS_PASSWORD }}
+          NATS_TOKEN: ${{ secrets.NATS_TOKEN }}
         run: npm run test:e2e -- live-switch
 
       - uses: actions/upload-artifact@v4

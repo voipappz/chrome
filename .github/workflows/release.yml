@@ -71,6 +71,10 @@ jobs:
         env:
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          # Optional: with these, the screen pop goes through NATS and the tab must open.
+          NATS_USER: ${{ secrets.NATS_USER }}
+          NATS_PASSWORD: ${{ secrets.NATS_PASSWORD }}
+          NATS_TOKEN: ${{ secrets.NATS_TOKEN }}
         run: |
           [ -n "$TEST_USERNAME" ] && [ -n "$TEST_PASSWORD" ] || { echo "::error::TEST_USERNAME / TEST_PASSWORD secrets are required for a release"; exit 1; }
           npx playwright test live-switch
