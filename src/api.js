@@ -14,14 +14,21 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, params, auth = true } = {}) {
+async function request(path, { method = 'GET', body, form, params, auth = true } = {}) {
   const url = new URL(endpoint() + path);
   if (params) url.search = serialize(params);
   const headers = {};
   if (auth) headers.Authorization = currentSession().token;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let payload;
+  if (form !== undefined) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    payload = new URLSearchParams(form).toString();
+  } else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    payload = JSON.stringify(body);
+  }
 
-  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(url, { method, headers, body: payload });
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -31,11 +38,14 @@ async function request(path, { method = 'GET', body, params, auth = true } = {})
 
 /**
  * POST /auth/user_login: the USER front door (users table), not the account
- * one. Credentials in the body only: a query string is written to every proxy
- * and access log on the way, password included.
+ * one. A FORM body: the API reads params['email'] / params['password']
+ * (voipappz-api lib/endpoints/auth.rb), which Sinatra fills from the query
+ * string or a form body -- never from JSON, which it answers 406 "Empty email
+ * field". Not the query string: that is written to every proxy and access log
+ * on the way, password included.
  */
 export function login(email, password) {
-  return request('/auth/user_login', { method: 'POST', body: { email, password }, auth: false });
+  return request('/auth/user_login', { method: 'POST', form: { email, password }, auth: false });
 }
 
 export const getUser = (uuid) => request(`/api/users/${uuid}`);

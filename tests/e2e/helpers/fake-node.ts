@@ -56,8 +56,23 @@ export async function startFakeNode(): Promise<FakeNode> {
       };
       if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
       if (req.method === 'POST' && req.url?.startsWith('/auth/user_login')) {
-        res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
-        res.end(JSON.stringify({ token: 'ci-fake-token', user: { uuid: userUuid, name: 'CI Agent', email: 'ci@fake.local' } }));
+        // As strict as the real API (voipappz-api lib/endpoints/auth.rb): it
+        // reads params, i.e. a form body or the query string, and answers a
+        // JSON body 406 "Empty email field". The query string is refused here
+        // too: it would put the password in every access log.
+        let raw = '';
+        req.on('data', (c) => { raw += c; });
+        req.on('end', () => {
+          const form = String(req.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded')
+            ? new URLSearchParams(raw) : new URLSearchParams();
+          if (req.url !== '/auth/user_login' || !form.get('email') || !form.get('password')) {
+            res.writeHead(406, { 'Content-Type': 'application/json', ...cors });
+            res.end(JSON.stringify({ id: 'not_acceptable', message: 'Empty email field' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+          res.end(JSON.stringify({ token: 'ci-fake-token', user: { uuid: userUuid, name: 'CI Agent', email: form.get('email') } }));
+        });
         return;
       }
       // Anything else doubles as the screen-pop target, so an opened tab has

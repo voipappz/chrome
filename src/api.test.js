@@ -22,7 +22,9 @@ describe('requests', () => {
     await login('a@b.c', 'pw');
     const [url, init] = fetch.mock.calls[0];
     expect(String(url)).toBe('https://portal.example/auth/user_login');
-    expect(JSON.parse(init.body)).toEqual({ email: 'a@b.c', password: 'pw' });
+    // A form body, as the API reads it (params, never JSON), and nothing in the URL.
+    expect(init.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    expect(Object.fromEntries(new URLSearchParams(init.body))).toEqual({ email: 'a@b.c', password: 'pw' });
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBeUndefined();
   });

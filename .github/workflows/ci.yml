@@ -56,6 +56,14 @@ jobs:
       - name: Live — wss://switch.voipappz.io/cable answers ActionCable
         run: node scripts/check-live-cable.mjs
 
+      # A real agent through the real extension: sign in at the switch, cable
+      # green. Repository secrets; a fork's PR has none, and the spec skips.
+      - name: Live — a real agent signs in and the cable goes green
+        env:
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        run: npm run test:e2e -- live-switch
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
