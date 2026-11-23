@@ -6,8 +6,8 @@
 // Opens the socket with no token, as nobody: a real cable server accepts the
 // actioncable-v1-json subprotocol and then answers in ActionCable -- here
 // {"type":"disconnect","reason":"unauthorized"}, because there is no token.
-// That proves the address resolves, TLS is valid, Kong routes /cable to a live
-// node, and the node speaks the protocol the worker speaks. It needs no
+// That proves the address resolves, TLS is valid, a cable server answers there,
+// and it speaks the protocol the worker speaks. It needs no
 // credential and changes nothing on the server. Exit 0 on an ActionCable
 // answer, 1 otherwise.
 import WebSocket from 'ws';
@@ -18,8 +18,6 @@ const fail = (why) => { console.error(`✗ ${url}: ${why}`); process.exit(1); };
 const timer = setTimeout(() => fail('no ActionCable answer within 15s'), 15000);
 
 const ws = new WebSocket(url, ['actioncable-v1-json']);
-let server = 'unknown';
-ws.on('upgrade', (res) => { server = res.headers.server || server; });
 ws.on('unexpected-response', (_req, res) => fail(`HTTP ${res.statusCode} instead of a WebSocket upgrade`));
 ws.on('error', (err) => fail(err.message));
 ws.on('open', () => {
@@ -30,7 +28,7 @@ ws.on('message', (data) => {
   try { frame = JSON.parse(String(data)); } catch { fail(`not JSON: ${String(data).slice(0, 80)}`); }
   if (frame?.type === 'welcome' || (frame?.type === 'disconnect' && frame.reason === 'unauthorized')) {
     clearTimeout(timer);
-    console.log(`✔ ${url} answers ActionCable (${frame.type}${frame.reason ? ': ' + frame.reason : ''}) via ${server}`);
+    console.log(`✔ ${url} answers ActionCable (${frame.type}${frame.reason ? ': ' + frame.reason : ''})`);
     ws.close();
     process.exit(0);
   }
