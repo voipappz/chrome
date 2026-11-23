@@ -47,7 +47,7 @@ test.describe('Live: the real switch', () => {
     await popup.waitForURL(/login/);
     await popup.locator('input[name="username"]').fill(USER);
     await popup.locator('input[name="password"]').fill(PASS);
-    await popup.getByRole('button', { name: /login/i }).click();
+    await popup.getByRole('button', { name: /^sign in$/i }).click();
 
     // A refused login shows the API's message instead of moving on.
     await expect(popup, 'the switch did not accept the login').toHaveURL(/main/, { timeout: 20_000 });

@@ -43,7 +43,7 @@ test.describe('Realtime against a mimicked node', () => {
     await page.evaluate((d) => localStorage.setItem('_domain', d), node.origin);
     await page.locator('input[name="username"]').fill('ci@fake.local');
     await page.locator('input[name="password"]').fill('anything');
-    await page.getByRole('button', { name: /login/i }).click();
+    await page.getByRole('button', { name: /^sign in$/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
     // Live means the socket is welcomed and Notifications is confirmed: only

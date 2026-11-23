@@ -51,7 +51,7 @@ test('an incoming call opens the agent tab in the extension', async () => {
     await page.evaluate((d) => localStorage.setItem('_domain', d), DOMAIN);
     await page.locator('input[name="username"]').fill(USER);
     await page.locator('input[name="password"]').fill(PASS);
-    await page.getByRole('button', { name: /login/i }).click();
+    await page.getByRole('button', { name: /^sign in$/i }).click();
     await expect(page).toHaveURL(/main/, { timeout: 20_000 });
 
     const uuid = await page.evaluate(() => localStorage.getItem('_id'));
