@@ -55,7 +55,7 @@ test.describe('Restart recovery against a mimicked node', () => {
     await popup.evaluate((d) => localStorage.setItem('_domain', d), node.origin);
     await popup.locator('input[name="username"]').fill('ci@fake.local');
     await popup.locator('input[name="password"]').fill('anything');
-    await popup.getByRole('button', { name: /login/i }).click();
+    await popup.getByRole('button', { name: /^sign in$/i }).click();
     await expect(popup.getByTestId('conn-dot')).toHaveAttribute('data-state', 'on', { timeout: 20_000 });
 
     // Restart Chrome. The new browser opens NO extension page.

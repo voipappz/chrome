@@ -63,7 +63,7 @@ test.describe('User connect', () => {
     await popupPage.evaluate((d) => localStorage.setItem('_domain', d), DOMAIN);
     await popupPage.locator('input[name="username"]').fill(USERNAME);
     await popupPage.locator('input[name="password"]').fill(PASSWORD);
-    await popupPage.getByRole('button', { name: /login/i }).click();
+    await popupPage.getByRole('button', { name: /^sign in$/i }).click();
 
     await expect(popupPage).toHaveURL(/main/, { timeout: 15_000 });
 
@@ -89,7 +89,7 @@ test.describe('User connect', () => {
     await popupPage.evaluate((d) => localStorage.setItem('_domain', d), DOMAIN);
     await popupPage.locator('input[name="username"]').fill(USERNAME);
     await popupPage.locator('input[name="password"]').fill(PASSWORD);
-    await popupPage.getByRole('button', { name: /login/i }).click();
+    await popupPage.getByRole('button', { name: /^sign in$/i }).click();
     await expect(popupPage).toHaveURL(/main/, { timeout: 15_000 });
 
     let [sw] = context.serviceWorkers();

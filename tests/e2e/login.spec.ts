@@ -13,7 +13,7 @@ const useDomain = (page, domain) =>
   page.evaluate((d) => localStorage.setItem('_domain', d), domain);
 const usernameInput = (page) => page.locator('input[name="username"]');
 const passwordInput = (page) => page.locator('input[name="password"]');
-const loginButton   = (page) => page.getByRole('button', { name: /login/i });
+const loginButton   = (page) => page.getByRole('button', { name: /^sign in$/i });
 const logoutButton  = (page) => page.getByRole('button', { name: /logout/i });
 
 async function loginWith(page, domain, username, password) {
