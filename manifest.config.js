@@ -1,10 +1,11 @@
 import { defineManifest } from '@crxjs/vite-plugin';
+import { CONFIG } from './src/config.js';
 
 // The source of truth for the extension's version. EXT_VERSION overrides it
 // for a one-off build without a commit:
 //
 //   EXT_VERSION=0.0.11 make extension-pack
-const SOURCE_VERSION = '0.0.10';
+const SOURCE_VERSION = '0.0.13';
 
 export default defineManifest(() => {
   const version = process.env.EXT_VERSION?.trim() || SOURCE_VERSION;
@@ -16,15 +17,15 @@ export default defineManifest(() => {
     throw new Error(`manifest: "${version}" is not a valid Chrome version (1-4 dot-separated integers)`);
   }
 
-  // "Nimbus10" for 0.0.10: the display name carries the patch, zero-padded to
-  // two. Derived so the two cannot disagree; they once drifted silently and an
+  // "Nimbus14" for the nimbus build of 0.0.14: the customer's title plus the
+  // patch, zero-padded to two. Derived so the two cannot disagree; they once drifted silently and an
   // installed extension claimed a version it was not.
   const patch = version.split('.').at(-1);
 
   return {
     manifest_version: 3,
-    name: `Nimbus${patch.padStart(2, '0')}`,
-    short_name: 'nimbus',
+    name: `${CONFIG.PAGE_TITLE}${patch.padStart(2, '0')}`,
+    short_name: CONFIG.CUSTOMER,
     version,
     description: 'Screen pops and call state for VoipAppz agents',
     // storage: the worker's own copy of the session (sessionStore.js);
@@ -32,7 +33,7 @@ export default defineManifest(() => {
     permissions: ['tabs', 'storage', 'alarms'],
     // 116: from here incoming socket traffic keeps the worker alive.
     minimum_chrome_version: '116',
-    action: { default_popup: 'index.html', default_title: 'Nimbus' },
+    action: { default_popup: 'index.html', default_title: CONFIG.PAGE_TITLE },
     background: { service_worker: 'src/background.js', type: 'module' },
     content_scripts: [{ js: ['src/content.js'], matches: ['<all_urls>'] }],
     content_security_policy: { extension_pages: "script-src 'self'; object-src 'self'" },

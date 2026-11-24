@@ -1,8 +1,7 @@
 # A release: push a tag vX.Y.Z (`make release VERSION=X.Y.Z`) and this builds,
-# tests and publishes it as a GitHub Release with the extension zip attached.
-# NOT the Chrome Web Store. The tag is the version: it is stamped into the
-# manifest (EXT_VERSION, manifest.config.js) and the zip's name, so what is
-# installed says which release it is.
+# tests and publishes it as a GitHub Release with ONE ZIP PER CUSTOMER
+# (src/customers.js): voipappz-extension-X.Y.Z.zip, nimbus-extension-X.Y.Z.zip.
+# NOT the Chrome Web Store. The tag is the version, stamped into each manifest.
 name: Release
 
 on:
@@ -19,7 +18,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -27,27 +26,14 @@ jobs:
         id: v
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # Chrome refuses anything but 1-4 dot-separated integers, 0-65535.
           echo "$version" | grep -Eq '^[0-9]{1,5}(\.[0-9]{1,5}){0,3}$' \
-            || { echo "::error::tag $GITHUB_REF_NAME is not v<chrome version> (e.g. v0.0.11)"; exit 1; }
+            || { echo "::error::tag $GITHUB_REF_NAME is not v<chrome version> (e.g. v0.0.14)"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "zip=voipappz-extension-$version.zip" >> "$GITHUB_OUTPUT"
 
       - uses: jdx/mise-action@v2
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run test:unit
-
-      - name: Build ${{ steps.v.outputs.version }}
-        env:
-          EXT_VERSION: ${{ steps.v.outputs.version }}
-        run: npm run build
-
-      - name: The build is the version
-        run: |
-          got=$(node -p "require('./dist/manifest.json').version")
-          [ "$got" = "${{ steps.v.outputs.version }}" ] || { echo "::error::manifest says $got"; exit 1; }
-          node -p "const m=require('./dist/manifest.json'); m.name + ' ' + m.version"
 
       - name: Playwright version
         id: pw
@@ -60,36 +46,46 @@ jobs:
       - if: steps.pw-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
-      # The release build itself, not a rebuild: the specs load dist/.
-      - name: End-to-end on the release build (offline, fake node)
-        run: npx playwright test mock-
-      - name: Live — wss://switch.voipappz.io/cable answers ActionCable
-        run: node scripts/check-live-cable.mjs
-      # The release build, signing in as a real agent: no release that cannot
-      # log in. Required here: a release without the secrets fails.
-      - name: Live — a real agent signs in with the release build
+      # Each customer's build, tested as it ships: the version is in the
+      # manifest, the offline specs pass on it, its own cable answers, a wrong
+      # password gets its own server's refusal, and -- where that customer's
+      # test agent is in the secrets -- a real sign-in turns the cable green.
+      # The voipappz sign-in is REQUIRED: no release that cannot log in.
+      - name: Build, test and zip each customer
         env:
-          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
-          # Optional: with these, the screen pop goes through NATS and the tab must open.
-          NATS_USER: ${{ secrets.NATS_USER }}
-          NATS_PASSWORD: ${{ secrets.NATS_PASSWORD }}
-          NATS_TOKEN: ${{ secrets.NATS_TOKEN }}
+          EXT_VERSION: ${{ steps.v.outputs.version }}
+          VOIPAPPZ_USER: ${{ secrets.TEST_USERNAME }}
+          VOIPAPPZ_PASS: ${{ secrets.TEST_PASSWORD }}
+          NIMBUS_USER: ${{ secrets.NIMBUS_TEST_USERNAME }}
+          NIMBUS_PASS: ${{ secrets.NIMBUS_TEST_PASSWORD }}
         run: |
-          [ -n "$TEST_USERNAME" ] && [ -n "$TEST_PASSWORD" ] || { echo "::error::TEST_USERNAME / TEST_PASSWORD secrets are required for a release"; exit 1; }
-          npx playwright test live-switch
-
-      - name: Zip
-        run: cd dist && python3 -m zipfile -c "../${{ steps.v.outputs.zip }}" *
+          [ -n "$VOIPAPPZ_USER" ] && [ -n "$VOIPAPPZ_PASS" ] || { echo "::error::TEST_USERNAME / TEST_PASSWORD secrets are required for a release"; exit 1; }
+          mkdir -p release
+          for c in voipappz nimbus; do
+            echo "::group::$c $EXT_VERSION"
+            export EXT_CUSTOMER=$c
+            npm run build
+            node -e "const m=require('./dist/manifest.json'); if (m.version!==process.env.EXT_VERSION) { console.error('manifest says '+m.version); process.exit(1) } console.log(m.name, m.version)"
+            npx playwright test mock-
+            node scripts/check-live-cable.mjs
+            u=$(eval echo "\$$(echo $c | tr a-z A-Z)_USER"); p=$(eval echo "\$$(echo $c | tr a-z A-Z)_PASS")
+            TEST_USERNAME="$u" TEST_PASSWORD="$p" npx playwright test live-switch
+            (cd dist && python3 -m zipfile -c "../release/$c-extension-$EXT_VERSION.zip" *)
+            echo "::endgroup::"
+          done
+          ls -la release
 
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
-          name=$(node -p "require('./dist/manifest.json').name")
-          gh release create "$GITHUB_REF_NAME" "${{ steps.v.outputs.zip }}" \
-            --title "$name (${{ steps.v.outputs.version }})" \
-            --notes "Install: unzip, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
-          Connects to wss://switch.voipappz.io/cable; logs in at https://switch.voipappz.io.
+          gh release create "$GITHUB_REF_NAME" release/*.zip \
+            --title "Agent extension $VERSION" \
+            --notes "One zip per customer:
+          - voipappz-extension-$VERSION.zip: logs in at https://switch.voipappz.io, cable wss://switch.voipappz.io/cable
+          - nimbus-extension-$VERSION.zip: logs in at https://nimbus-prod.voipappz.io, cable wss://nimbus-prod.voipappz.io/cable
+
+          Install: unzip, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
           Built and tested by the Release workflow from ${GITHUB_SHA::7}." \
             --verify-tag

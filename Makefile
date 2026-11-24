@@ -22,7 +22,7 @@ setup: ## Install node (mise), the dependencies and Chromium for the e2e specs
 dev: ## Keep dist/ live; popup also at http://localhost:5175/index.html
 	$(NPM) run dev
 
-build: ## Build into dist/ (chrome://extensions -> Load unpacked)
+build: ## [EXT_CUSTOMER=voipappz|nimbus] Build into dist/ (chrome://extensions -> Load unpacked)
 	$(NPM) run build
 	@echo "extension -> $(CURDIR)/dist  (chrome://extensions -> Load unpacked)"
 
@@ -41,7 +41,7 @@ e2e: build ## [SPEC=mock-] Playwright specs in a real Chrome (default: the offli
 
 # The real switch, from here: does the cable this build connects to answer
 # ActionCable? No credential, changes nothing (scripts/check-live-cable.mjs).
-live: ## The build's cable (wss://switch.voipappz.io/cable) answers ActionCable
+live: ## [EXT_CUSTOMER=x] The customer's cable answers ActionCable
 	$(NPM) exec -- node scripts/check-live-cable.mjs
 
 # One screen pop through NATS, as the platform sends it (scripts/screen-pop.mjs).
